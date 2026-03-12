@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeviceMonitor — Android Telemetry Library</title>
+  <meta
+    name="description"
+    content="DeviceMonitor is a lightweight Android telemetry library for monitoring CPU, memory, storage, battery, thermal status, network traffic, and frame metrics."
+  />
+  <style>
+    :root {
+      --bg: #0a0f1c;
+      --bg-soft: #111827;
+      --card: rgba(255, 255, 255, 0.06);
+      --card-strong: rgba(255, 255, 255, 0.08);
+      --text: #f3f4f6;
+      --muted: #cbd5e1;
+      --line: rgba(255, 255, 255, 0.12);
+      --accent: #60a5fa;
+      --accent-2: #34d399;
+      --warn: #fbbf24;
+      --code: #0b1220;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      --radius: 24px;
+      --radius-sm: 16px;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 32%),
+        radial-gradient(circle at 80% 10%, rgba(52, 211, 153, 0.12), transparent 25%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .container {
+      width: min(calc(100% - 32px), var(--max));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(10px);
+      background: rgba(10, 15, 28, 0.72);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px 0;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      font-size: 1.05rem;
+    }
+
+    .nav {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .hero {
+      padding: 52px 0 28px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-main {
+      padding: 40px;
+    }
+
+    .badge {
+      display: inline-flex;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(52, 211, 153, 0.1);
+      border: 1px solid rgba(52, 211, 153, 0.25);
+      color: #bbf7d0;
+      font-size: 0.9rem;
+      margin-bottom: 18px;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 12px;
+      line-height: 1.15;
+    }
+
+    h1 {
+      font-size: clamp(2.3rem, 5vw, 4.4rem);
+      letter-spacing: -0.03em;
+    }
+
+    h2 {
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      font-size: 1.2rem;
+    }
+
+    .lead {
+      font-size: 1.08rem;
+      color: var(--muted);
+      max-width: 760px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 13px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      transition: 0.18s ease;
+      font-weight: 600;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: #fff;
+      color: #0b1220;
+      border-color: #fff;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .stat {
+      background: rgba(0, 0, 0, 0.18);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.1rem;
+      margin-bottom: 4px;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .code-card {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(96, 165, 250, 0.25);
+      background: rgba(96, 165, 250, 0.1);
+      color: #bfdbfe;
+      font-size: 0.78rem;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      border-radius: 18px;
+      overflow-x: auto;
+      background: var(--code);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #dbeafe;
+      line-height: 1.55;
+      font-size: 0.92rem;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .section {
+      padding: 14px 0 0;
+    }
+
+    .grid-4, .grid-2, .grid-5, .grid-3 {
+      display: grid;
+      gap: 18px;
+    }
+
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-5 { grid-template-columns: repeat(5, 1fr); }
+
+    .card {
+      padding: 24px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .card p, .card li {
+      color: var(--muted);
+    }
+
+    .chip-list {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(0, 0, 0, 0.18);
+      padding: 14px 16px;
+      color: #e5e7eb;
+    }
+
+    .warn-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .warn {
+      border: 1px solid rgba(251, 191, 36, 0.22);
+      border-radius: 16px;
+      background: rgba(251, 191, 36, 0.11);
+      padding: 14px 16px;
+      color: #fde68a;
+    }
+
+    .highlight {
+      background: linear-gradient(
+        135deg,
+        rgba(96, 165, 250, 0.08),
+        rgba(255, 255, 255, 0.04),
+        rgba(52, 211, 153, 0.08)
+      );
+    }
+
+    .usecases {
+      margin-top: 18px;
+    }
+
+    .usecase {
+      text-align: center;
+      padding: 18px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.18);
+      color: #f8fafc;
+    }
+
+    .footer-cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 0.95rem;
+    }
+
+    .inline-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 2px 8px;
+      color: #e2e8f0;
+    }
+
+    .spacer { height: 18px; }
+
+    @media (max-width: 980px) {
+      .hero-grid,
+      .grid-4,
+      .grid-5,
+      .grid-3,
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .hero-grid,
+      .grid-4,
+      .grid-5,
+      .grid-3,
+      .grid-2,
+      .chip-list,
+      .warn-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-main,
+      .card {
+        padding: 22px;
+      }
+
+      .topbar-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav {
+        gap: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">DeviceMonitor</div>
+      <nav class="nav">
+        <a href="#installation">Install</a>
+        <a href="#features">Features</a>
+        <a href="#telemetry">Telemetry</a>
+        <a href="#warnings">Warnings</a>
+        <a href="#github">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="panel hero-main">
+          <div class="badge">Android telemetry for heavy workloads</div>
+          <h1>Observe device health in real time.</h1>
+          <p class="lead">
+            DeviceMonitor is a lightweight Android library for tracking CPU, RAM, storage,
+            battery, thermal status, network traffic, and frame timing. Built for apps that run
+            exports, media processing, long background jobs, archive generation, and other
+            CPU-intensive workloads.
+          </p>
+
+          <div class="actions">
+            <a class="btn btn-primary" href="https://github.com/0Dimidrol0/DeviceMonitor" target="_blank" rel="noreferrer">View on GitHub</a>
+            <a class="btn btn-secondary" href="#installation">Get started</a>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <strong>Kotlin Flow</strong>
+              <span>Reactive snapshots and warnings</span>
+            </div>
+            <div class="stat">
+              <strong>Android 7+</strong>
+              <span>FrameMetrics support</span>
+            </div>
+            <div class="stat">
+              <strong>JSON-ready</strong>
+              <span>Easy backend telemetry payloads</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel code-card">
+          <div class="code-head">
+            <span>Quick start</span>
+            <span class="pill">Kotlin</span>
+          </div>
+          <pre><code>DeviceMonitor.init(context)
+
+val monitor = DeviceMonitor.getInstance()
+monitor.start()
+
+lifecycleScope.launch {
+    monitor.snapshots.collect { snapshot ->
+        Log.d("DeviceMonitor", "CPU usage: ${snapshot.cpuUsagePercent}")
+        Log.d("DeviceMonitor", "Battery temp: ${snapshot.batteryTempC}")
+    }
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="grid-4">
+        <div class="card">
+          <h3>Core telemetry</h3>
+          <p>Track CPU, RAM, storage, battery, charging state, thermal throttling, and network type with a lightweight Android-first API.</p>
+        </div>
+        <div class="card">
+          <h3>Reactive streams</h3>
+          <p>Expose live telemetry and warning events through Kotlin Flows so your UI, logs, or backend pipeline can react in real time.</p>
+        </div>
+        <div class="card">
+          <h3>Extended signals</h3>
+          <p>Collect thermal zones, network traffic deltas, battery power data, and frame metrics for deeper device diagnostics.</p>
+        </div>
+        <div class="card">
+          <h3>Configurable sampling</h3>
+          <p>Tune sampling cadence, thresholds, and enabled sensors with DeviceMonitorConfig to match your workload.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section id="installation" class="section">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Installation</h2>
+          <p>Add DeviceMonitor from Maven Central and initialize it once in your application process.</p>
+          <pre><code>dependencies {
+    implementation("io.github.0dimidrol0:DeviceMonitor:0.2.0")
+}</code></pre>
+          <p class="small muted" style="margin-top: 14px;">
+            Artifact: <span class="inline-code">io.github.0dimidrol0:DeviceMonitor:0.2.0</span>
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>What it tracks</h2>
+          <div class="chip-list">
+            <div class="chip">CPU usage and frequencies</div>
+            <div class="chip">Available RAM and thresholds</div>
+            <div class="chip">Free storage and low-storage alerts</div>
+            <div class="chip">Battery temperature and level</div>
+            <div class="chip">Thermal status and thermal zones</div>
+            <div class="chip">Network type and traffic deltas</div>
+            <div class="chip">Frame duration and jank percentage</div>
+            <div class="chip">Charging and power details</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section id="telemetry" class="section">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Runtime configuration</h2>
+          <p>Adjust thresholds and sampling cadence for production diagnostics, QA stress testing, or long-running background jobs.</p>
+          <pre><code>DeviceMonitor.init(
+    appContext,
+    DeviceMonitorConfig.builder()
+        .samplePeriodMs(5_000L)
+        .memoryThresholdMb(512)
+        .batteryTemperatureThresholdC(48f)
+        .enableCpu(true)
+        .build()
+)</code></pre>
+        </div>
+
+        <div id="warnings" class="card">
+          <h2>Warning events</h2>
+          <p>Subscribe to warning flows and react when the device starts approaching critical limits.</p>
+          <div class="warn-grid">
+            <div class="warn">Thermal level changed</div>
+            <div class="warn">Battery low</div>
+            <div class="warn">Battery temperature high</div>
+            <div class="warn">CPU overloaded</div>
+            <div class="warn">Memory low</div>
+            <div class="warn">Storage low</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Extended telemetry</h2>
+          <p><strong>thermalZones</strong> gives you per-zone thermal readings from <span class="inline-code">/sys/class/thermal/thermal_zone*</span>.</p>
+          <p><strong>networkTraffic</strong> captures TX/RX totals and deltas across time windows.</p>
+          <p><strong>batteryPower</strong> exposes current, charge counter, and battery percentage.</p>
+          <p><strong>frameMetrics</strong> helps profile frame duration and jank on Android 7+.</p>
+          <p><strong>thermalZones</strong> and <strong>networkTraffic</strong> are easy to serialize to JSON for sending to your backend.</p>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <h2 style="margin-bottom:0;">FrameMetrics hook</h2>
+            <span class="pill">Android 7+</span>
+          </div>
+          <div style="height:14px;"></div>
+          <pre><code>override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    DeviceMonitor.init(applicationContext)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        DeviceMonitor.getInstance().registerFrameMetrics(window)
+    }
+}
+
+override fun onDestroy() {
+    DeviceMonitor.getInstance().unregisterFrameMetrics()
+    super.onDestroy()
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section">
+      <div class="card highlight">
+        <h2>Where DeviceMonitor fits best</h2>
+        <div class="grid-5 usecases">
+          <div class="usecase">Data export</div>
+          <div class="usecase">Archive generation</div>
+          <div class="usecase">Media processing</div>
+          <div class="usecase">Long background tasks</div>
+          <div class="usecase">CPU-intensive workloads</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section id="github" class="section" style="padding-bottom: 34px;">
+      <div class="card footer-cta">
+        <div>
+          <h2>Publish it from your repository</h2>
+          <p class="muted">Use this file as your project landing page via GitHub Pages.</p>
+        </div>
+        <div class="actions" style="margin-top:0;">
+          <a class="btn btn-primary" href="https://github.com/0Dimidrol0/DeviceMonitor" target="_blank" rel="noreferrer">Open repository</a>
+          <a class="btn btn-secondary" href="#installation">Copy install snippet</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
