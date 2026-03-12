@@ -48,7 +48,7 @@ SharedFlow<DeviceWarningEvent>
 
 ```kotlin
 dependencies {
-    implementation("io.github.0dimidrol0:DeviceMonitor:0.1.4")
+    implementation("io.github.0dimidrol0:DeviceMonitor:0.2.0")
 }
 ```
 
@@ -56,7 +56,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'io.github.0dimidrol0:DeviceMonitor:0.1.4'
+    implementation 'io.github.0dimidrol0:DeviceMonitor:0.2.0'
 }
 ```
 
