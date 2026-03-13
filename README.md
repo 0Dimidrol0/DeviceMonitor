@@ -1,4 +1,4 @@
-# Device Monitor
+# DeviceMonitor
 
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.0dimidrol0/DeviceMonitor)
 ![Android](https://img.shields.io/badge/platform-android-green)
@@ -7,7 +7,7 @@
 
 Lightweight Android device telemetry library.
 
-**Device Monitor** helps monitor device health during heavy operations like:
+**DeviceMonitor** helps monitor device health during heavy operations like:
 
 - data export
 - archive generation
@@ -21,9 +21,9 @@ The library continuously collects system metrics and exposes them through **Kotl
 
 ## Features
 
-Device Monitor tracks:
+DeviceMonitor tracks:
 
-- CPU usage (until API LVL 27)
+- CPU usage (Some CPU metrics may be limited on newer Android versions due to platform restrictions)
 - CPU frequencies
 - RAM availability
 - Storage free space
