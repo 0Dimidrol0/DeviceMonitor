@@ -77,7 +77,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override val snapshots: SharedFlow<DeviceSnapshot> = _snapshots.asSharedFlow()
 
     private val _warningEvents = MutableSharedFlow<DeviceWarningEvent>(
-        replay = 0,
+        replay = DEFAULT_INT,
         extraBufferCapacity = 16
     )
     override val warningEvents: SharedFlow<DeviceWarningEvent> = _warningEvents.asSharedFlow()
@@ -145,7 +145,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             detachBatteryReceiver()
         }
 
-        val period = samplePeriodMs.takeIf { it > 0 } ?: currentConfig.samplePeriodMs
+        val period = samplePeriodMs.takeIf { it > DEFAULT_LONG } ?: currentConfig.samplePeriodMs
 
         pollJob?.cancel()
         warningEventThrottle.reset()
@@ -162,7 +162,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override fun snapshotNow() = collectSnapshot()
 
     override suspend fun snapshotNowAwait(timeoutMs: Long): DeviceSnapshot {
-        val requestTimeout = timeoutMs.takeIf { it > 0 } ?: currentConfig.samplePeriodMs
+        val requestTimeout = timeoutMs.takeIf { it > DEFAULT_LONG } ?: currentConfig.samplePeriodMs
         return withContext(Dispatchers.Default) {
             withTimeout(requestTimeout) {
                 collectSnapshot()
@@ -230,7 +230,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             override fun onReceive(context: Context, intent: Intent) {
                 lastBatteryTempC =
                     intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, DEFAULT_VALUE)
-                        .takeIf { it >= 0 }
+                        .takeIf { it >= DEFAULT_INT }
                         ?.div(TEMP_TENTH_DIVIDER)
 
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, DEFAULT_VALUE)
@@ -246,7 +246,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                         status == BatteryManager.BATTERY_STATUS_FULL
 
                 lastBatteryVoltageMv =
-                    intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, DEFAULT_VALUE).takeIf { it >= 0 }
+                    intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, DEFAULT_VALUE).takeIf { it >= DEFAULT_INT }
                 lastBatteryHealth = BatteryHealth.fromAndroid(
                     intent.getIntExtra(BatteryManager.EXTRA_HEALTH, DEFAULT_VALUE)
                 )
@@ -331,10 +331,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
 
     private fun emitEvents(snapshot: DeviceSnapshot) {
         val memoryRisk = currentConfig.enableMemory && snapshot.memLow == true && snapshot.memAvailBytes != null
-        if (memoryRisk && warningEventThrottle.shouldEmitMemoryLow(isRiskActive = memoryRisk)) {
+        if (warningEventThrottle.shouldEmitMemoryLow(isRiskActive = memoryRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.MemoryLow(
-                    snapshot.memAvailBytes!!,
+                    requireNotNull(snapshot.memAvailBytes),
                     memoryThresholdBytes
                 )
             )
@@ -345,10 +345,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         val storageRisk = currentConfig.enableStorage &&
             snapshot.storageFreeBytes != null &&
             snapshot.storageFreeBytes < storageLowThresholdBytes
-        if (storageRisk && warningEventThrottle.shouldEmitStorageLow(isRiskActive = storageRisk)) {
+        if (warningEventThrottle.shouldEmitStorageLow(isRiskActive = storageRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.StorageLow(
-                    snapshot.storageFreeBytes!!,
+                    requireNotNull(snapshot.storageFreeBytes),
                     storageLowThresholdBytes,
                     snapshot.storageTotalBytes
                 )
@@ -362,10 +362,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             val batteryLowRisk = level != null &&
                 level <= batteryLowThresholdPercent &&
                 snapshot.isCharging != true
-            if (batteryLowRisk && warningEventThrottle.shouldEmitBatteryLow(isRiskActive = batteryLowRisk)) {
+            if (warningEventThrottle.shouldEmitBatteryLow(isRiskActive = batteryLowRisk)) {
                 _warningEvents.tryEmit(
                     DeviceWarningEvent.BatteryLow(
-                        level!!,
+                        requireNotNull(level),
                         batteryLowThresholdPercent,
                         snapshot.isCharging
                     )
@@ -376,10 +376,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
 
             val batteryTemp = snapshot.batteryTempC
             val batteryTempRisk = batteryTemp != null && batteryTemp >= batteryTempThresholdC
-            if (batteryTempRisk && warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = batteryTempRisk)) {
+            if (warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = batteryTempRisk)) {
                 _warningEvents.tryEmit(
                     DeviceWarningEvent.BatteryTemperatureHigh(
-                        batteryTemp!!,
+                        requireNotNull(batteryTemp),
                         batteryTempThresholdC
                     )
                 )
@@ -394,12 +394,12 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         if (currentConfig.enableCpu) {
             val usage = snapshot.cpuUsagePercent
             val cpuOverloadRisk = usage != null && usage >= cpuOverloadThresholdPercent
-            if (cpuOverloadRisk && warningEventThrottle.shouldEmitCpuOverload(isRiskActive = cpuOverloadRisk)) {
+            if (warningEventThrottle.shouldEmitCpuOverload(isRiskActive = cpuOverloadRisk)) {
                 _warningEvents.tryEmit(
                     DeviceWarningEvent.CpuOverload(
-                        usage!!,
+                        requireNotNull(usage),
                         cpuOverloadThresholdPercent,
-                        snapshot.cpuUsagePerCore?.size ?: 0
+                        snapshot.cpuUsagePerCore?.size.orDefault()
                     )
                 )
             } else {
@@ -447,7 +447,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             val cores = cpuDir.listFiles { f ->
                 f.isDirectory && f.name.startsWith(CPU_PREFIX) &&
                         f.name.drop(CPU_PREFIX.length).all { it.isDigit() }
-            }?.sortedBy { it.name.drop(CPU_PREFIX.length).toIntOrNull() ?: 0 } ?: return null
+            }?.sortedBy { it.name.drop(CPU_PREFIX.length).toIntOrNull().orDefault() } ?: return null
 
             cores.map { core ->
                 val freqFile = File(core, CPU_FREQ)
@@ -483,7 +483,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             lastCpuTotal = total
             lastCpuIdle = idle
 
-            if (diffTotal <= 0) return null
+            if (diffTotal <= DEFAULT_INT) return null
 
             (100f * (diffTotal - diffIdle) / diffTotal)
         } catch (_: Throwable) {
@@ -499,7 +499,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             stats.forEach { line ->
                 if (!line.startsWith(CPU_PREFIX)) return@forEach
                 val parts = line.split("\\s+".toRegex())
-                val label = parts.getOrNull(0) ?: return@forEach
+                val label = parts.getOrNull(DEFAULT_INT) ?: return@forEach
                 if (label == CPU_PREFIX) return@forEach
                 if (!label.firstOrNull()?.isLetter().orDefault()) return@forEach
 
@@ -514,7 +514,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 if (previous != null) {
                     val diffTotal = total - previous.total
                     val diffIdle = idle - previous.idle
-                    if (diffTotal > 0) {
+                    if (diffTotal > DEFAULT_INT) {
                         usage += 100f * (diffTotal - diffIdle) / diffTotal
                     }
                 }
@@ -584,13 +584,13 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         val txTotal = safeTrafficValue(TrafficStats.getTotalTxBytes())
         val rxTotal = safeTrafficValue(TrafficStats.getTotalRxBytes())
         val deltaTx = if (txTotal != null && lastTxBytes != null) {
-            (txTotal - lastTxBytes.orDefault()).coerceAtLeast(0L)
+            (txTotal - lastTxBytes.orDefault()).coerceAtLeast(DEFAULT_LONG)
         } else {
             null
         }
 
         val deltaRx = if (rxTotal != null && lastRxBytes != null) {
-            (rxTotal - lastRxBytes.orDefault()).coerceAtLeast(0L)
+            (rxTotal - lastRxBytes.orDefault()).coerceAtLeast(DEFAULT_LONG)
         } else {
             null
         }
@@ -609,14 +609,14 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         )
     }
 
-    private fun safeTrafficValue(value: Long): Long? = value.takeIf { it >= 0 }
+    private fun safeTrafficValue(value: Long): Long? = value.takeIf { it >= DEFAULT_INT }
 
     private fun readBatteryPower(): BatteryPowerSnapshot? {
         val batteryManager = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
             ?: return null
         val currentNow = safeLongProperty(batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW))
         val chargeCounter = safeLongProperty(batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER))
-        val capacity = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it >= 0 }
+        val capacity = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it >= DEFAULT_INT }
 
         return BatteryPowerSnapshot(
             currentMicroAmps = currentNow,
