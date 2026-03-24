@@ -13,8 +13,11 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.StatFs
 import android.net.TrafficStats
+import android.system.Os
+import android.system.OsConstants
 import androidx.annotation.RequiresPermission
 import android.view.Window
 import androidx.core.content.ContextCompat
@@ -51,9 +54,17 @@ private const val CPU_DIR = "/sys/devices/system/cpu/"
 private const val CPU_FREQ = "cpufreq/scaling_cur_freq"
 private const val CPU_STAT = "/proc/stat"
 private const val CPU_PREFIX = "cpu"
+private const val PROC_SELF_STAT = "/proc/self/stat"
 private const val UPTIME_PATH = "/proc/uptime"
-private const val THERMAL_ROOT = "/sys/class/thermal"
+private val THERMAL_ROOTS = listOf("/sys/class/thermal", "/sys/devices/virtual/thermal")
+private const val HWMON_ROOT = "/sys/class/hwmon"
 private const val TEMP_TENTH_DIVIDER = 10f
+private const val CPU_JIFFY_FALLBACK = 100L
+private const val PROCESS_STAT_UTIME_INDEX = 13
+private const val PROCESS_STAT_STIME_INDEX = 14
+private const val PROCESS_STAT_CUTIME_INDEX = 15
+private const val PROCESS_STAT_CSTIME_INDEX = 16
+private const val PROCESS_STAT_SPLIT_LIMIT = PROCESS_STAT_CSTIME_INDEX + 2
 private const val DEFAULT_VALUE = -1
 
 private data class CpuTimes(val total: Long, val idle: Long)
@@ -99,6 +110,14 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private var lastCpuTotal = DEFAULT_LONG
     private var lastCpuIdle = DEFAULT_LONG
     private val lastCpuPerCoreTimes = mutableMapOf<String, CpuTimes>()
+    private val cpuCoreCount = runCatching {
+        Os.sysconf(OsConstants._SC_NPROCESSORS_CONF).toInt()
+    }.getOrDefault(Runtime.getRuntime().availableProcessors()).coerceAtLeast(1)
+    private val cpuTicksPerSecond = runCatching {
+        Os.sysconf(OsConstants._SC_CLK_TCK)
+    }.getOrDefault(CPU_JIFFY_FALLBACK).coerceAtLeast(1L)
+    private var lastProcessCpuTimeSec = 0.0
+    private var lastProcessElapsedSec = 0.0
 
     private var lastTxBytes: Long? = null
     private var lastRxBytes: Long? = null
@@ -271,7 +290,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private fun collectSnapshot(): DeviceSnapshot {
         val timestamp = System.currentTimeMillis()
         val thermal = if (currentConfig.enableThermal) {
-            ThermalLevel.fromInt(getThermalStatusFallback())
+            readThermalLevel()
         } else {
             ThermalLevel.UNKNOWN
         }
@@ -410,7 +429,12 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         }
     }
 
-    private fun getThermalStatusFallback(): Int? {
+    private fun readThermalLevel(): ThermalLevel {
+        val fromSystem = readSystemThermalStatus()?.let(ThermalLevel::fromInt)
+        return fromSystem ?: inferThermalLevelFromBatteryTemp(lastBatteryTempC)
+    }
+
+    private fun readSystemThermalStatus(): Int? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
 
         val pm = powerManager
@@ -463,13 +487,17 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     }
 
     private fun readCpuUsage(): Float? {
+        return readCpuUsageFromProcStat() ?: readProcessCpuUsageFallback()
+    }
+
+    private fun readCpuUsageFromProcStat(): Float? {
         return try {
             val line = File(CPU_STAT).useLines { it.firstOrNull() } ?: return null
             val values = line.split("\\s+".toRegex()).mapNotNull { it.toLongOrNull() }
-            if (values.size < 8) return null
+            if (values.size < 5) return null
 
-            val total = values.subList(0, 7).sum()
-            val idle = values[3]
+            val total = values.sum()
+            val idle = values[3] + values.getOrElse(4) { 0L }
 
             if (lastCpuTotal == DEFAULT_LONG) {
                 lastCpuTotal = total
@@ -491,6 +519,41 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         }
     }
 
+    private fun readProcessCpuUsageFallback(): Float? {
+        return try {
+            val line = File(PROC_SELF_STAT).useLines { it.firstOrNull() } ?: return null
+            val statData = line.split("\\s+".toRegex(), limit = PROCESS_STAT_SPLIT_LIMIT)
+            if (statData.size <= PROCESS_STAT_CSTIME_INDEX) return null
+
+            val processCpuTicks = statData[PROCESS_STAT_UTIME_INDEX].toDouble() +
+                statData[PROCESS_STAT_STIME_INDEX].toDouble() +
+                statData[PROCESS_STAT_CUTIME_INDEX].toDouble() +
+                statData[PROCESS_STAT_CSTIME_INDEX].toDouble()
+
+            val currentCpuTimeSec = processCpuTicks / cpuTicksPerSecond
+            val currentElapsedSec = SystemClock.elapsedRealtime() / 1000.0
+
+            if (lastProcessCpuTimeSec <= 0.0 || lastProcessElapsedSec <= 0.0) {
+                lastProcessCpuTimeSec = currentCpuTimeSec
+                lastProcessElapsedSec = currentElapsedSec
+                return null
+            }
+
+            val cpuDeltaSec = currentCpuTimeSec - lastProcessCpuTimeSec
+            val elapsedDeltaSec = currentElapsedSec - lastProcessElapsedSec
+
+            lastProcessCpuTimeSec = currentCpuTimeSec
+            lastProcessElapsedSec = currentElapsedSec
+
+            if (cpuDeltaSec <= 0.0 || elapsedDeltaSec <= 0.0) return null
+
+            val usageRatio = (cpuDeltaSec / elapsedDeltaSec) / cpuCoreCount
+            (usageRatio * 100.0).coerceIn(0.0, 100.0).toFloat()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     private fun readCpuUsagePerCore(): List<Float>? {
         return try {
             val stats = File(CPU_STAT).readLines()
@@ -504,10 +567,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 if (!label.firstOrNull()?.isLetter().orDefault()) return@forEach
 
                 val values = parts.drop(1).mapNotNull { it.toLongOrNull() }
-                if (values.size < 7) return@forEach
+                if (values.size < 5) return@forEach
 
-                val total = values.subList(0, 7).sum()
-                val idle = values[3]
+                val total = values.sum()
+                val idle = values[3] + values.getOrElse(4) { 0L }
                 val previous = lastCpuPerCoreTimes[label]
                 lastCpuPerCoreTimes[label] = CpuTimes(total, idle)
 
@@ -552,27 +615,87 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     }
 
     private fun readThermalZones(): List<ThermalZoneReading>? {
-        return try {
-            val root = File(THERMAL_ROOT)
-            val zones = root.listFiles { file ->
-                file.isDirectory && file.name.startsWith("thermal_zone")
-            } ?: return null
+        val collected = linkedMapOf<String, ThermalZoneReading>()
 
-            zones.mapNotNull { zone ->
-                val typeFile = File(zone, "type")
-                val tempFile = File(zone, "temp")
-                val type = typeFile.takeIf { it.exists() }?.readText()?.trim()
-                val rawTemp = tempFile.takeIf { it.exists() }?.readText()?.trim()?.toFloatOrNull()
-                val temp = rawTemp?.let { normalizeThermalTemp(it) }
-                ThermalZoneReading(
-                    name = zone.name,
-                    type = type,
-                    temperatureC = temp
+        readClassicThermalZones().forEach { zone ->
+            collected[zone.name] = zone
+        }
+        readHwmonThermalZones().forEach { zone ->
+            collected.putIfAbsent(zone.name, zone)
+        }
+
+        if (collected.isEmpty()) {
+            lastBatteryTempC?.let { batteryTemp ->
+                collected["battery"] = ThermalZoneReading(
+                    name = "battery",
+                    type = "battery",
+                    temperatureC = batteryTemp
                 )
             }
-        } catch (_: Throwable) {
-            null
         }
+
+        return collected.values.toList().ifEmpty { null }
+    }
+
+    private fun readClassicThermalZones(): List<ThermalZoneReading> {
+        return runCatching {
+            THERMAL_ROOTS.flatMap { rootPath ->
+                val root = File(rootPath)
+                val zones = root.listFiles { file ->
+                    file.isDirectory && file.name.startsWith("thermal_zone")
+                } ?: return@flatMap emptyList()
+
+                zones.mapNotNull { zone ->
+                    val typeFile = File(zone, "type")
+                    val tempFile = File(zone, "temp")
+                    val type = typeFile.takeIf { it.exists() }?.readText()?.trim()
+                    val rawTemp = tempFile.takeIf { it.exists() }?.readText()?.trim()?.toFloatOrNull()
+                    val temp = rawTemp?.let { normalizeThermalTemp(it) }
+
+                    if (type == null && temp == null) {
+                        null
+                    } else {
+                        ThermalZoneReading(
+                            name = zone.name,
+                            type = type,
+                            temperatureC = temp
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun readHwmonThermalZones(): List<ThermalZoneReading> {
+        return runCatching {
+            val hwmonRoot = File(HWMON_ROOT)
+            val hwmonDirs = hwmonRoot.listFiles { file ->
+                file.isDirectory && file.name.startsWith("hwmon")
+            } ?: return@runCatching emptyList()
+
+            hwmonDirs.flatMap { dir ->
+                val sensorName = File(dir, "name").takeIf { it.exists() }?.readText()?.trim().orEmpty()
+                val inputFiles = dir.listFiles { file ->
+                    file.isFile && file.name.startsWith("temp") && file.name.endsWith("_input")
+                } ?: return@flatMap emptyList()
+
+                inputFiles.mapNotNull { input ->
+                    val key = input.name.removeSuffix("_input")
+                    val rawTemp = input.readText().trim().toFloatOrNull() ?: return@mapNotNull null
+                    val label = File(dir, "${key}_label").takeIf { it.exists() }?.readText()?.trim()
+                    val type = listOf(sensorName.takeIf { it.isNotBlank() }, label)
+                        .filterNotNull()
+                        .joinToString(":")
+                        .ifBlank { null }
+
+                    ThermalZoneReading(
+                        name = "${dir.name}/$key",
+                        type = type,
+                        temperatureC = normalizeThermalTemp(rawTemp)
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     private fun normalizeThermalTemp(value: Float): Float {
