@@ -77,7 +77,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override val snapshots: SharedFlow<DeviceSnapshot> = _snapshots.asSharedFlow()
 
     private val _warningEvents = MutableSharedFlow<DeviceWarningEvent>(
-        replay = 0,
+        replay = DEFAULT_INT,
         extraBufferCapacity = 16
     )
     override val warningEvents: SharedFlow<DeviceWarningEvent> = _warningEvents.asSharedFlow()
@@ -105,9 +105,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private var lastTrafficTimestampMs = System.currentTimeMillis()
     private var frameMetricsTracker: FrameMetricsTracker? = null
 
-    private var batteryLowAlerted = false
-    private var batteryTempAlerted = false
-    private var cpuOverloadAlerted = false
+    private val warningEventThrottle = WarningEventThrottle()
 
     fun init(context: Context, config: DeviceMonitorConfig = DeviceMonitorConfig()) {
         appContext = context.applicationContext
@@ -147,9 +145,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             detachBatteryReceiver()
         }
 
-        val period = samplePeriodMs.takeIf { it > 0 } ?: currentConfig.samplePeriodMs
+        val period = samplePeriodMs.takeIf { it > DEFAULT_LONG } ?: currentConfig.samplePeriodMs
 
         pollJob?.cancel()
+        warningEventThrottle.reset()
         pollJob = scope.launch {
             while (isActive) {
                 val snapshot = collectSnapshot()
@@ -163,7 +162,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override fun snapshotNow() = collectSnapshot()
 
     override suspend fun snapshotNowAwait(timeoutMs: Long): DeviceSnapshot {
-        val requestTimeout = timeoutMs.takeIf { it > 0 } ?: currentConfig.samplePeriodMs
+        val requestTimeout = timeoutMs.takeIf { it > DEFAULT_LONG } ?: currentConfig.samplePeriodMs
         return withContext(Dispatchers.Default) {
             withTimeout(requestTimeout) {
                 collectSnapshot()
@@ -174,6 +173,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override fun stop() {
         pollJob?.cancel()
         pollJob = null
+        warningEventThrottle.reset()
         detachThermalListener()
         detachBatteryReceiver()
     }
@@ -230,7 +230,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             override fun onReceive(context: Context, intent: Intent) {
                 lastBatteryTempC =
                     intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, DEFAULT_VALUE)
-                        .takeIf { it >= 0 }
+                        .takeIf { it >= DEFAULT_INT }
                         ?.div(TEMP_TENTH_DIVIDER)
 
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, DEFAULT_VALUE)
@@ -246,7 +246,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                         status == BatteryManager.BATTERY_STATUS_FULL
 
                 lastBatteryVoltageMv =
-                    intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, DEFAULT_VALUE).takeIf { it >= 0 }
+                    intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, DEFAULT_VALUE).takeIf { it >= DEFAULT_INT }
                 lastBatteryHealth = BatteryHealth.fromAndroid(
                     intent.getIntExtra(BatteryManager.EXTRA_HEALTH, DEFAULT_VALUE)
                 )
@@ -330,77 +330,83 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     }
 
     private fun emitEvents(snapshot: DeviceSnapshot) {
-        if (currentConfig.enableMemory && snapshot.memLow == true && snapshot.memAvailBytes != null) {
+        val memoryRisk = currentConfig.enableMemory && snapshot.memLow == true && snapshot.memAvailBytes != null
+        if (warningEventThrottle.shouldEmitMemoryLow(isRiskActive = memoryRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.MemoryLow(
-                    snapshot.memAvailBytes,
+                    requireNotNull(snapshot.memAvailBytes),
                     memoryThresholdBytes
                 )
             )
+        } else {
+            warningEventThrottle.shouldEmitMemoryLow(isRiskActive = false)
         }
 
-        if (currentConfig.enableStorage &&
+        val storageRisk = currentConfig.enableStorage &&
             snapshot.storageFreeBytes != null &&
             snapshot.storageFreeBytes < storageLowThresholdBytes
-        ) {
+        if (warningEventThrottle.shouldEmitStorageLow(isRiskActive = storageRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.StorageLow(
-                    snapshot.storageFreeBytes,
+                    requireNotNull(snapshot.storageFreeBytes),
                     storageLowThresholdBytes,
                     snapshot.storageTotalBytes
                 )
             )
+        } else {
+            warningEventThrottle.shouldEmitStorageLow(isRiskActive = false)
         }
 
         if (currentConfig.enableBattery) {
             val level = snapshot.batteryLevel
-            if (level != null && level <= batteryLowThresholdPercent && snapshot.isCharging != true) {
-                if (!batteryLowAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.BatteryLow(
-                            level,
-                            batteryLowThresholdPercent,
-                            snapshot.isCharging
-                        )
+            val batteryLowRisk = level != null &&
+                level <= batteryLowThresholdPercent &&
+                snapshot.isCharging != true
+            if (warningEventThrottle.shouldEmitBatteryLow(isRiskActive = batteryLowRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.BatteryLow(
+                        requireNotNull(level),
+                        batteryLowThresholdPercent,
+                        snapshot.isCharging
                     )
-                    batteryLowAlerted = true
-                }
+                )
             } else {
-                batteryLowAlerted = false
+                warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
             }
 
             val batteryTemp = snapshot.batteryTempC
-            if (batteryTemp != null && batteryTemp >= batteryTempThresholdC) {
-                if (!batteryTempAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.BatteryTemperatureHigh(
-                            batteryTemp,
-                            batteryTempThresholdC
-                        )
+            val batteryTempRisk = batteryTemp != null && batteryTemp >= batteryTempThresholdC
+            if (warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = batteryTempRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.BatteryTemperatureHigh(
+                        requireNotNull(batteryTemp),
+                        batteryTempThresholdC
                     )
-                    batteryTempAlerted = true
-                }
+                )
             } else {
-                batteryTempAlerted = false
+                warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
             }
+        } else {
+            warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
+            warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
         }
 
         if (currentConfig.enableCpu) {
             val usage = snapshot.cpuUsagePercent
-            if (usage != null && usage >= cpuOverloadThresholdPercent) {
-                if (!cpuOverloadAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.CpuOverload(
-                            usage,
-                            cpuOverloadThresholdPercent,
-                            snapshot.cpuUsagePerCore?.size ?: 0
-                        )
+            val cpuOverloadRisk = usage != null && usage >= cpuOverloadThresholdPercent
+            if (warningEventThrottle.shouldEmitCpuOverload(isRiskActive = cpuOverloadRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.CpuOverload(
+                        requireNotNull(usage),
+                        cpuOverloadThresholdPercent,
+                        snapshot.cpuUsagePerCore?.size.orDefault()
                     )
-                    cpuOverloadAlerted = true
-                }
+                )
             } else {
-                cpuOverloadAlerted = false
+                warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
             }
+        } else {
+            warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
         }
     }
 
@@ -441,7 +447,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             val cores = cpuDir.listFiles { f ->
                 f.isDirectory && f.name.startsWith(CPU_PREFIX) &&
                         f.name.drop(CPU_PREFIX.length).all { it.isDigit() }
-            }?.sortedBy { it.name.drop(CPU_PREFIX.length).toIntOrNull() ?: 0 } ?: return null
+            }?.sortedBy { it.name.drop(CPU_PREFIX.length).toIntOrNull().orDefault() } ?: return null
 
             cores.map { core ->
                 val freqFile = File(core, CPU_FREQ)
@@ -477,7 +483,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             lastCpuTotal = total
             lastCpuIdle = idle
 
-            if (diffTotal <= 0) return null
+            if (diffTotal <= DEFAULT_INT) return null
 
             (100f * (diffTotal - diffIdle) / diffTotal)
         } catch (_: Throwable) {
@@ -493,7 +499,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             stats.forEach { line ->
                 if (!line.startsWith(CPU_PREFIX)) return@forEach
                 val parts = line.split("\\s+".toRegex())
-                val label = parts.getOrNull(0) ?: return@forEach
+                val label = parts.getOrNull(DEFAULT_INT) ?: return@forEach
                 if (label == CPU_PREFIX) return@forEach
                 if (!label.firstOrNull()?.isLetter().orDefault()) return@forEach
 
@@ -508,7 +514,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 if (previous != null) {
                     val diffTotal = total - previous.total
                     val diffIdle = idle - previous.idle
-                    if (diffTotal > 0) {
+                    if (diffTotal > DEFAULT_INT) {
                         usage += 100f * (diffTotal - diffIdle) / diffTotal
                     }
                 }
@@ -578,13 +584,13 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         val txTotal = safeTrafficValue(TrafficStats.getTotalTxBytes())
         val rxTotal = safeTrafficValue(TrafficStats.getTotalRxBytes())
         val deltaTx = if (txTotal != null && lastTxBytes != null) {
-            (txTotal - lastTxBytes.orDefault()).coerceAtLeast(0L)
+            (txTotal - lastTxBytes.orDefault()).coerceAtLeast(DEFAULT_LONG)
         } else {
             null
         }
 
         val deltaRx = if (rxTotal != null && lastRxBytes != null) {
-            (rxTotal - lastRxBytes.orDefault()).coerceAtLeast(0L)
+            (rxTotal - lastRxBytes.orDefault()).coerceAtLeast(DEFAULT_LONG)
         } else {
             null
         }
@@ -603,14 +609,14 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         )
     }
 
-    private fun safeTrafficValue(value: Long): Long? = value.takeIf { it >= 0 }
+    private fun safeTrafficValue(value: Long): Long? = value.takeIf { it >= DEFAULT_INT }
 
     private fun readBatteryPower(): BatteryPowerSnapshot? {
         val batteryManager = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
             ?: return null
         val currentNow = safeLongProperty(batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW))
         val chargeCounter = safeLongProperty(batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER))
-        val capacity = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it >= 0 }
+        val capacity = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it >= DEFAULT_INT }
 
         return BatteryPowerSnapshot(
             currentMicroAmps = currentNow,
