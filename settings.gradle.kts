@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Device Monitor"
 include(":device_monitor")
+include(":app")
  

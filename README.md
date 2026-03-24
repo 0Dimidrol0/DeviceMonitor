@@ -122,6 +122,31 @@ DeviceMonitor.init(
 
 ---
 
+# Showcase App Module
+
+This repository now includes a ready-to-use sample app module: `:app`.
+
+It demonstrates:
+
+- live `DeviceSnapshot` rendering
+- warning event timeline
+- start/stop controls and instant snapshot button
+- polished dashboard UI suitable for README screenshots
+
+Run locally:
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+Install APK from:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
 # Observing Device Metrics
 
 ```kotlin
