@@ -105,9 +105,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private var lastTrafficTimestampMs = System.currentTimeMillis()
     private var frameMetricsTracker: FrameMetricsTracker? = null
 
-    private var batteryLowAlerted = false
-    private var batteryTempAlerted = false
-    private var cpuOverloadAlerted = false
+    private val warningEventThrottle = WarningEventThrottle()
 
     fun init(context: Context, config: DeviceMonitorConfig = DeviceMonitorConfig()) {
         appContext = context.applicationContext
@@ -150,6 +148,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         val period = samplePeriodMs.takeIf { it > 0 } ?: currentConfig.samplePeriodMs
 
         pollJob?.cancel()
+        warningEventThrottle.reset()
         pollJob = scope.launch {
             while (isActive) {
                 val snapshot = collectSnapshot()
@@ -174,6 +173,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     override fun stop() {
         pollJob?.cancel()
         pollJob = null
+        warningEventThrottle.reset()
         detachThermalListener()
         detachBatteryReceiver()
     }
@@ -330,77 +330,83 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     }
 
     private fun emitEvents(snapshot: DeviceSnapshot) {
-        if (currentConfig.enableMemory && snapshot.memLow == true && snapshot.memAvailBytes != null) {
+        val memoryRisk = currentConfig.enableMemory && snapshot.memLow == true && snapshot.memAvailBytes != null
+        if (memoryRisk && warningEventThrottle.shouldEmitMemoryLow(isRiskActive = memoryRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.MemoryLow(
-                    snapshot.memAvailBytes,
+                    snapshot.memAvailBytes!!,
                     memoryThresholdBytes
                 )
             )
+        } else {
+            warningEventThrottle.shouldEmitMemoryLow(isRiskActive = false)
         }
 
-        if (currentConfig.enableStorage &&
+        val storageRisk = currentConfig.enableStorage &&
             snapshot.storageFreeBytes != null &&
             snapshot.storageFreeBytes < storageLowThresholdBytes
-        ) {
+        if (storageRisk && warningEventThrottle.shouldEmitStorageLow(isRiskActive = storageRisk)) {
             _warningEvents.tryEmit(
                 DeviceWarningEvent.StorageLow(
-                    snapshot.storageFreeBytes,
+                    snapshot.storageFreeBytes!!,
                     storageLowThresholdBytes,
                     snapshot.storageTotalBytes
                 )
             )
+        } else {
+            warningEventThrottle.shouldEmitStorageLow(isRiskActive = false)
         }
 
         if (currentConfig.enableBattery) {
             val level = snapshot.batteryLevel
-            if (level != null && level <= batteryLowThresholdPercent && snapshot.isCharging != true) {
-                if (!batteryLowAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.BatteryLow(
-                            level,
-                            batteryLowThresholdPercent,
-                            snapshot.isCharging
-                        )
+            val batteryLowRisk = level != null &&
+                level <= batteryLowThresholdPercent &&
+                snapshot.isCharging != true
+            if (batteryLowRisk && warningEventThrottle.shouldEmitBatteryLow(isRiskActive = batteryLowRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.BatteryLow(
+                        level!!,
+                        batteryLowThresholdPercent,
+                        snapshot.isCharging
                     )
-                    batteryLowAlerted = true
-                }
+                )
             } else {
-                batteryLowAlerted = false
+                warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
             }
 
             val batteryTemp = snapshot.batteryTempC
-            if (batteryTemp != null && batteryTemp >= batteryTempThresholdC) {
-                if (!batteryTempAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.BatteryTemperatureHigh(
-                            batteryTemp,
-                            batteryTempThresholdC
-                        )
+            val batteryTempRisk = batteryTemp != null && batteryTemp >= batteryTempThresholdC
+            if (batteryTempRisk && warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = batteryTempRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.BatteryTemperatureHigh(
+                        batteryTemp!!,
+                        batteryTempThresholdC
                     )
-                    batteryTempAlerted = true
-                }
+                )
             } else {
-                batteryTempAlerted = false
+                warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
             }
+        } else {
+            warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
+            warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
         }
 
         if (currentConfig.enableCpu) {
             val usage = snapshot.cpuUsagePercent
-            if (usage != null && usage >= cpuOverloadThresholdPercent) {
-                if (!cpuOverloadAlerted) {
-                    _warningEvents.tryEmit(
-                        DeviceWarningEvent.CpuOverload(
-                            usage,
-                            cpuOverloadThresholdPercent,
-                            snapshot.cpuUsagePerCore?.size ?: 0
-                        )
+            val cpuOverloadRisk = usage != null && usage >= cpuOverloadThresholdPercent
+            if (cpuOverloadRisk && warningEventThrottle.shouldEmitCpuOverload(isRiskActive = cpuOverloadRisk)) {
+                _warningEvents.tryEmit(
+                    DeviceWarningEvent.CpuOverload(
+                        usage!!,
+                        cpuOverloadThresholdPercent,
+                        snapshot.cpuUsagePerCore?.size ?: 0
                     )
-                    cpuOverloadAlerted = true
-                }
+                )
             } else {
-                cpuOverloadAlerted = false
+                warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
             }
+        } else {
+            warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
         }
     }
 
