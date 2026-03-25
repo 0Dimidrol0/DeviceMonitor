@@ -1,14 +1,13 @@
 # DeviceMonitor
 
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.0dimidrol0/DeviceMonitor)
-![GitHub release](https://img.shields.io/github/v/release/0Dimidrol0/DeviceMonitor)
+![Build](https://img.shields.io/github/actions/workflow/status/0Dimidrol0/DeviceMonitor/publish.yml?branch=master&label=build)
 ![Android](https://img.shields.io/badge/Android-library-3DDC84)
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Modern-7F52FF)
-![Build](https://img.shields.io/github/actions/workflow/status/0Dimidrol0/DeviceMonitor/.github/workflows/publish.yml?branch=master&label=build)
 ![GitHub stars](https://img.shields.io/github/stars/0Dimidrol0/DeviceMonitor?style=social)
-![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-brightgreen)](https://0dimidrol0.github.io/DeviceMonitor/)
 
 Lightweight Android device telemetry library.
 
