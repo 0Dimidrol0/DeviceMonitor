@@ -124,6 +124,16 @@ DeviceMonitor.init(
 
 # Showcase App Module
 
+<p align="center">
+  <img src="docs/images/Screenshot_1.png" alt="DeviceMonitor showcase main dashboard" width="47%" />
+  <img src="docs/images/Screenshot_2.png" alt="DeviceMonitor live metrics dashboard" width="47%" />
+</p>
+
+<p align="center">
+  <sub>Main dashboard</sub> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <sub>Live metrics state</sub>
+</p>
+
 This repository now includes a ready-to-use sample app module: `:app`.
 
 It demonstrates:
