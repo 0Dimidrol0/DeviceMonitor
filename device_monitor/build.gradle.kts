@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "io.github.dimidrol"
-version = System.getenv("GITHUB_REF_NAME")?.removePrefix("v") ?: "0.3.0"
+version = System.getenv("GITHUB_REF_NAME")?.removePrefix("v") ?: "0.4.0"
 
 android {
     namespace = "io.github.dimidrol"
@@ -54,7 +54,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.0dimidrol0",
         artifactId = "DeviceMonitor",
-        version = System.getenv("GITHUB_REF_NAME")?.removePrefix("v") ?: "0.3.0"
+        version = System.getenv("GITHUB_REF_NAME")?.removePrefix("v") ?: "0.4.0"
     )
 
     pom {

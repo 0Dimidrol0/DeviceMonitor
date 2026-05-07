@@ -24,7 +24,9 @@ data class DeviceSnapshot(
     val uptimeMs: Long? = null,
     val batteryVoltageMv: Int? = null,
     val batteryHealth: BatteryHealth? = null,
-    val batteryPlugType: PowerSource? = null
+    val batteryPlugType: PowerSource? = null,
+    val thermalHeadroom: ThermalHeadroomSnapshot? = null,
+    val batteryDrain: BatteryDrainSnapshot? = null
 ) {
 
     fun averageCpuUsage(): Float? = cpuUsagePerCore?.takeIf { it.isNotEmpty() }?.average()?.toFloat()
@@ -80,6 +82,8 @@ data class DeviceSnapshot(
             append(" net=").append(networkType)
             append(" risk=").append(riskScore())
             append(" uptime=").append(uptimeMs)
+            append(" thermalHeadroom=").append(thermalHeadroom?.currentHeadroom)
+            append(" drainPerHour=").append(batteryDrain?.drainPercentPerHour)
         }
     }
 }

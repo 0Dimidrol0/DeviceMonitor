@@ -7,6 +7,12 @@ data class DeviceMonitorConfig(
     val cpuOverloadThresholdPercent: Float = DEFAULT_CPU_OVERLOAD_THRESHOLD_PERCENT,
     val batteryLowThresholdPercent: Int = DEFAULT_BATTERY_LOW_THRESHOLD_PERCENT,
     val batteryTemperatureThresholdC: Float = DEFAULT_BATTERY_TEMPERATURE_THRESHOLD_C,
+    val enableRecommendations: Boolean = DEFAULT_ENABLE_RECOMMENDATIONS,
+    val enableThermalHeadroom: Boolean = DEFAULT_ENABLE_THERMAL_HEADROOM,
+    val enableBatteryDrain: Boolean = DEFAULT_ENABLE_BATTERY_DRAIN,
+    val recommendationCooldownMs: Long = DEFAULT_RECOMMENDATION_COOLDOWN_MS,
+    val thermalHeadroomForecastSeconds: Int = DEFAULT_THERMAL_HEADROOM_FORECAST_SECONDS,
+    val batteryDrainHighThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_HIGH_THRESHOLD_PERCENT_PER_HOUR,
     val enableThermal: Boolean = true,
     val enableBattery: Boolean = true,
     val enableCpu: Boolean = true,
@@ -22,6 +28,12 @@ data class DeviceMonitorConfig(
         cpuOverloadThresholdPercent(cpuOverloadThresholdPercent)
         batteryLowThresholdPercent(batteryLowThresholdPercent)
         batteryTemperatureThresholdC(batteryTemperatureThresholdC)
+        enableRecommendations(enableRecommendations)
+        enableThermalHeadroom(enableThermalHeadroom)
+        enableBatteryDrain(enableBatteryDrain)
+        recommendationCooldownMs(recommendationCooldownMs)
+        thermalHeadroomForecastSeconds(thermalHeadroomForecastSeconds)
+        batteryDrainHighThresholdPercentPerHour(batteryDrainHighThresholdPercentPerHour)
         enableThermal(enableThermal)
         enableBattery(enableBattery)
         enableCpu(enableCpu)
@@ -41,6 +53,12 @@ data class DeviceMonitorConfig(
         private var cpuOverloadThresholdPercent: Float = DEFAULT_CPU_OVERLOAD_THRESHOLD_PERCENT
         private var batteryLowThresholdPercent: Int = DEFAULT_BATTERY_LOW_THRESHOLD_PERCENT
         private var batteryTemperatureThresholdC: Float = DEFAULT_BATTERY_TEMPERATURE_THRESHOLD_C
+        private var enableRecommendations: Boolean = DEFAULT_ENABLE_RECOMMENDATIONS
+        private var enableThermalHeadroom: Boolean = DEFAULT_ENABLE_THERMAL_HEADROOM
+        private var enableBatteryDrain: Boolean = DEFAULT_ENABLE_BATTERY_DRAIN
+        private var recommendationCooldownMs: Long = DEFAULT_RECOMMENDATION_COOLDOWN_MS
+        private var thermalHeadroomForecastSeconds: Int = DEFAULT_THERMAL_HEADROOM_FORECAST_SECONDS
+        private var batteryDrainHighThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_HIGH_THRESHOLD_PERCENT_PER_HOUR
         private var enableThermal: Boolean = true
         private var enableBattery: Boolean = true
         private var enableCpu: Boolean = true
@@ -70,6 +88,30 @@ data class DeviceMonitorConfig(
 
         fun batteryTemperatureThresholdC(value: Float) = apply {
             batteryTemperatureThresholdC = value
+        }
+
+        fun enableRecommendations(enabled: Boolean) = apply {
+            enableRecommendations = enabled
+        }
+
+        fun enableThermalHeadroom(enabled: Boolean) = apply {
+            enableThermalHeadroom = enabled
+        }
+
+        fun enableBatteryDrain(enabled: Boolean) = apply {
+            enableBatteryDrain = enabled
+        }
+
+        fun recommendationCooldownMs(value: Long) = apply {
+            recommendationCooldownMs = value
+        }
+
+        fun thermalHeadroomForecastSeconds(value: Int) = apply {
+            thermalHeadroomForecastSeconds = value
+        }
+
+        fun batteryDrainHighThresholdPercentPerHour(value: Float) = apply {
+            batteryDrainHighThresholdPercentPerHour = value
         }
 
         fun enableThermal(enabled: Boolean) = apply {
@@ -104,6 +146,12 @@ data class DeviceMonitorConfig(
                 cpuOverloadThresholdPercent = cpuOverloadThresholdPercent.coerceIn(0f, 100f),
                 batteryLowThresholdPercent = batteryLowThresholdPercent.coerceIn(0, 100),
                 batteryTemperatureThresholdC = batteryTemperatureThresholdC,
+                enableRecommendations = enableRecommendations,
+                enableThermalHeadroom = enableThermalHeadroom,
+                enableBatteryDrain = enableBatteryDrain,
+                recommendationCooldownMs = recommendationCooldownMs.coerceAtLeast(0L),
+                thermalHeadroomForecastSeconds = thermalHeadroomForecastSeconds.coerceAtLeast(0),
+                batteryDrainHighThresholdPercentPerHour = batteryDrainHighThresholdPercentPerHour.coerceAtLeast(0f),
                 enableThermal = enableThermal,
                 enableBattery = enableBattery,
                 enableCpu = enableCpu,

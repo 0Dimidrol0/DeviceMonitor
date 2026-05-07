@@ -26,3 +26,18 @@ data class BatteryPowerSnapshot(
     val capacityPercent: Int?,
     val timestampMs: Long
 )
+
+data class ThermalHeadroomSnapshot(
+    val currentHeadroom: Float?,
+    val forecastHeadroom: Float?,
+    val forecastSeconds: Int?,
+    val status: ThermalLevel
+)
+
+data class BatteryDrainSnapshot(
+    val currentMicroAmps: Long?,
+    val voltageMv: Int?,
+    val estimatedPowerWatts: Float?,
+    val drainPercentPerHour: Float?,
+    val estimatedTimeToEmptyMs: Long?
+)
