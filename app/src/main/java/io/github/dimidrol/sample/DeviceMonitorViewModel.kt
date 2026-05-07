@@ -119,19 +119,23 @@ class DeviceMonitorViewModel : ViewModel() {
 
 private fun DeviceWarningEvent.toTitle(): String = when (this) {
     is DeviceWarningEvent.ThermalChanged -> "Thermal status changed"
+    is DeviceWarningEvent.ThermalHeadroomLow -> "Thermal headroom low"
     is DeviceWarningEvent.MemoryLow -> "Low memory"
     is DeviceWarningEvent.StorageLow -> "Low storage"
     is DeviceWarningEvent.BatteryLow -> "Battery low"
     is DeviceWarningEvent.BatteryTemperatureHigh -> "Battery hot"
+    is DeviceWarningEvent.BatteryDrainHigh -> "Battery drain high"
     is DeviceWarningEvent.CpuOverload -> "CPU overload"
 }
 
 private fun DeviceWarningEvent.toDetails(): String = when (this) {
     is DeviceWarningEvent.ThermalChanged -> "${from.name} -> ${to.name}"
+    is DeviceWarningEvent.ThermalHeadroomLow -> "Current=${currentHeadroom ?: "n/a"} Forecast=${forecastHeadroom ?: "n/a"}"
     is DeviceWarningEvent.MemoryLow -> "Available RAM: ${availBytes.toReadableBytes()}"
     is DeviceWarningEvent.StorageLow -> "Free storage: ${freeBytes.toReadableBytes()}"
     is DeviceWarningEvent.BatteryLow -> "Level: ${levelPercent}%"
     is DeviceWarningEvent.BatteryTemperatureHigh -> "Temperature: ${"%.1f".format(temperatureC)} C"
+    is DeviceWarningEvent.BatteryDrainHigh -> "Drain: ${"%.1f".format(drainPercentPerHour)}%/h"
     is DeviceWarningEvent.CpuOverload -> "Usage: ${"%.1f".format(usagePercent)}% on $coreCount cores"
 }
 

@@ -3,6 +3,7 @@ package io.github.dimidrol
 import android.content.Context
 import android.view.Window
 import io.github.dimidrol.impl.DeviceMonitorImpl
+import io.github.dimidrol.models.DeviceRecommendation
 import io.github.dimidrol.models.DeviceSnapshot
 import io.github.dimidrol.models.DeviceWarningEvent
 import kotlinx.coroutines.flow.SharedFlow
@@ -35,6 +36,11 @@ interface DeviceMonitor {
      * ```
      */
     val warningEvents: SharedFlow<DeviceWarningEvent>
+
+    /**
+     * Stream of adaptive workload recommendations based on current device health.
+     */
+    val recommendations: SharedFlow<DeviceRecommendation>
 
     /**
      * Starts periodic device telemetry sampling.
@@ -101,6 +107,11 @@ interface DeviceMonitor {
      * ```
      */
     fun unregisterFrameMetrics()
+
+    /**
+     * Creates a named workload session for profiling warning and recommendation density.
+     */
+    fun createWorkloadSession(name: String, type: WorkloadType = WorkloadType.CUSTOM): WorkloadSession
 
     companion object {
         /**

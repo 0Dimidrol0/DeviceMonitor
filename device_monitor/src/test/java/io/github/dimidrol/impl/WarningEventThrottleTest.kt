@@ -46,4 +46,19 @@ class WarningEventThrottleTest {
         assertFalse(throttle.shouldEmitBatteryTempHigh(isRiskActive = false))
         assertTrue(throttle.shouldEmitBatteryTempHigh(isRiskActive = true))
     }
+
+    @Test
+    fun rearmThermalHeadroomAndDrainWarnings() {
+        val throttle = WarningEventThrottle()
+
+        assertTrue(throttle.shouldEmitThermalHeadroomLow(isRiskActive = true))
+        assertFalse(throttle.shouldEmitThermalHeadroomLow(isRiskActive = true))
+        assertFalse(throttle.shouldEmitThermalHeadroomLow(isRiskActive = false))
+        assertTrue(throttle.shouldEmitThermalHeadroomLow(isRiskActive = true))
+
+        assertTrue(throttle.shouldEmitBatteryDrainHigh(isRiskActive = true))
+        assertFalse(throttle.shouldEmitBatteryDrainHigh(isRiskActive = true))
+        assertFalse(throttle.shouldEmitBatteryDrainHigh(isRiskActive = false))
+        assertTrue(throttle.shouldEmitBatteryDrainHigh(isRiskActive = true))
+    }
 }

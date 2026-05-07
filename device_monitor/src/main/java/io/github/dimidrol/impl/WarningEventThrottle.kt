@@ -7,6 +7,8 @@ internal class WarningEventThrottle {
     private var batteryLowReported = false
     private var batteryTempReported = false
     private var cpuOverloadReported = false
+    private var thermalHeadroomReported = false
+    private var batteryDrainReported = false
 
     fun reset() {
         memoryLowReported = false
@@ -14,6 +16,8 @@ internal class WarningEventThrottle {
         batteryLowReported = false
         batteryTempReported = false
         cpuOverloadReported = false
+        thermalHeadroomReported = false
+        batteryDrainReported = false
     }
 
     fun shouldEmitMemoryLow(isRiskActive: Boolean): Boolean {
@@ -49,6 +53,20 @@ internal class WarningEventThrottle {
             isRiskActive = isRiskActive,
             isAlreadyReported = cpuOverloadReported
         ) { cpuOverloadReported = it }
+    }
+
+    fun shouldEmitThermalHeadroomLow(isRiskActive: Boolean): Boolean {
+        return shouldEmitOnTransition(
+            isRiskActive = isRiskActive,
+            isAlreadyReported = thermalHeadroomReported
+        ) { thermalHeadroomReported = it }
+    }
+
+    fun shouldEmitBatteryDrainHigh(isRiskActive: Boolean): Boolean {
+        return shouldEmitOnTransition(
+            isRiskActive = isRiskActive,
+            isAlreadyReported = batteryDrainReported
+        ) { batteryDrainReported = it }
     }
 
     private inline fun shouldEmitOnTransition(

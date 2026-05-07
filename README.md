@@ -6,20 +6,9 @@
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Modern-7F52FF)
-![GitHub stars](https://img.shields.io/github/stars/0Dimidrol0/DeviceMonitor?style=social)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-brightgreen)](https://0dimidrol0.github.io/DeviceMonitor/)
 
-Lightweight Android device telemetry library.
-
-**DeviceMonitor** helps monitor device health during heavy operations like:
-
-- data export
-- archive generation
-- media processing
-- long background tasks
-- CPU intensive workloads
-
-The library continuously collects system metrics and exposes them through **Kotlin Flows**.
+Lightweight Android telemetry library for high-load sessions such as media processing, streaming, exports, archiving, and long-running background work.
 
 ---
 
@@ -27,90 +16,60 @@ The library continuously collects system metrics and exposes them through **Kotl
 
 DeviceMonitor tracks:
 
-- CPU usage (Some CPU metrics may be limited on newer Android versions due to platform restrictions)
+- CPU usage and per-core usage
 - CPU frequencies
-- RAM availability
-- Storage free space
-- Battery temperature
-- Battery level
-- Charging state
-- Thermal throttling status
-- Network type
+- RAM and storage pressure
+- Battery temperature, level, voltage, charge source, and health
+- Thermal status and thermal zones
+- Network type and traffic deltas
+- Frame metrics (duration/jank)
+- Battery power and battery drain estimation
+- Thermal headroom snapshots
 
 Data streams:
 
-```
-SharedFlow<DeviceSnapshot>  
+```kotlin
+SharedFlow<DeviceSnapshot>
 SharedFlow<DeviceWarningEvent>
+SharedFlow<DeviceRecommendation>
 ```
 
 ---
 
-# Installation
+## Installation
 
-## Gradle (Kotlin DSL)
+### Gradle (Kotlin DSL)
 
 ```kotlin
 dependencies {
-    implementation("io.github.0dimidrol0:DeviceMonitor:0.3.0")
+    implementation("io.github.0dimidrol0:DeviceMonitor:0.4.0")
 }
 ```
 
-## Gradle (Groovy)
+### Gradle (Groovy)
 
 ```groovy
 dependencies {
-    implementation 'io.github.0dimidrol0:DeviceMonitor:0.3.0'
+    implementation 'io.github.0dimidrol0:DeviceMonitor:0.4.0'
 }
 ```
 
 ---
 
-# Quick Start
-
-init in Application:
+## Quick Start
 
 ```kotlin
-DeviceMonitor.init(context)
-```
+DeviceMonitor.init(applicationContext)
 
-Get monitor instance:
-
-```kotlin
 val monitor = DeviceMonitor.getInstance()
-```
-
-Start monitoring:
-
-```kotlin
 monitor.start()
-```
 
-Stop monitoring:
+val snapshot = monitor.snapshotNow()
 
-```kotlin
 monitor.stop()
 ```
 
-Take snapshot:
-
-```kotlin
-val snapshot = monitor.snapshotNow()
-```
-
-Set Storage Low Threshold in MegaBytes:
-
-```kotlin
-DeviceMonitor.setStorageLowThreshold(100)
-```
-
-Set Memory Low Threshold in MegaBytes:
-
-```kotlin
-DeviceMonitor.setMemoryLowThreshold(100)
-```
-
-You can also customize sampling cadence, thresholds and sensors via `DeviceMonitorConfig`:
+Custom configuration:
 
 ```kotlin
 DeviceMonitor.init(
@@ -119,266 +78,159 @@ DeviceMonitor.init(
         .samplePeriodMs(5_000L)
         .memoryThresholdMb(512)
         .batteryTemperatureThresholdC(48f)
-        .enableCpu(true)
+        .enableRecommendations(true)
+        .recommendationCooldownMs(15_000L)
+        .enableThermalHeadroom(true)
+        .enableBatteryDrain(true)
+        .thermalHeadroomForecastSeconds(10)
+        .batteryDrainHighThresholdPercentPerHour(20f)
         .build()
 )
 ```
 
 ---
 
-# Showcase App Module
+## Adaptive Workload Guard (0.4.0)
 
-<p align="center">
-  <img src="docs/images/Screenshot_1.png" alt="DeviceMonitor showcase main dashboard" width="47%" />
-  <img src="docs/images/Screenshot_2.png" alt="DeviceMonitor live metrics dashboard" width="47%" />
-</p>
-
-<p align="center">
-  <sub>Main dashboard</sub> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <sub>Live metrics state</sub>
-</p>
-
-This repository now includes a ready-to-use sample app module: `:app`.
-
-It demonstrates:
-
-- live `DeviceSnapshot` rendering
-- warning event timeline
-- start/stop controls and instant snapshot button
-- polished dashboard UI suitable for README screenshots
-
-Run locally:
-
-```bash
-./gradlew :app:assembleDebug
-```
-
-Install APK from:
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
----
-
-# Observing Device Metrics
+Recommendations are emitted from `monitor.recommendations` and can be applied directly to bitrate/FPS/concurrency controls.
 
 ```kotlin
 lifecycleScope.launch {
-    monitor.snapshots.collect { snapshot ->
-
-        Log.d("DeviceMonitor", "CPU usage: ${snapshot.cpuUsagePercent}")
-        Log.d("DeviceMonitor", "Battery temp: ${snapshot.batteryTempC}")
-        Log.d("DeviceMonitor", "Free RAM: ${snapshot.memAvailBytes}")
-        Log.d("DeviceMonitor", "Storage free: ${snapshot.storageFreeBytes}")
-
-    }
-}
-```
-
----
-
-# Extended Telemetry
-
-Additionally, `DeviceSnapshot` provides:
-
-- `thermalZones` — a list of `/sys/class/thermal/thermal_zone*` entries with their type and temperature in °C.
-- `networkTraffic` — `TrafficStats` can be used to measure TX/RX and deltas over a period.
-- `batteryPower` — `BatteryManager` returns the current in microamps, `chargeCounter`, and battery percentage.
-- `frameMetrics` — on Android 7+ you can attach to a window and collect frame duration and jank percentage.
-
-Example of registering FrameMetrics:
-
-```kotlin
-override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    DeviceMonitor.init(applicationContext)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-        DeviceMonitor.getInstance().registerFrameMetrics(window)
-    }
-}
-
-override fun onDestroy() {
-    DeviceMonitor.getInstance().unregisterFrameMetrics()
-    super.onDestroy()
-}
-```
-
-`thermalZones` and `networkTraffic` can be easily serialized to JSON for sending to a server.
-
----
-
-# Listening for Warning Events
-
-```kotlin
-lifecycleScope.launch {
-    monitor.warningEvents.collect { event ->
-
-        when (event) {
-
-            is DeviceWarningEvent.ThermalChanged -> {
-                Log.w("DeviceMonitor", "Thermal level changed: ${event.to}")
+    monitor.recommendations.collect { recommendation ->
+        when (recommendation) {
+            is DeviceRecommendation.ReduceWorkload -> {
+                encoder.setBitrate((baseBitrate * recommendation.suggestedScale).toInt())
+                camera.setTargetFps((baseFps * recommendation.suggestedScale).toInt())
+                workerPool.setMaxConcurrency(
+                    (baseConcurrency * recommendation.suggestedScale).toInt().coerceAtLeast(1)
+                )
             }
-
-            is DeviceWarningEvent.BatteryLow -> {
-                Log.w("DeviceMonitor", "Low battery ${event.levelPercent}% (threshold=${event.thresholdPercent}%)")
-            }
-
-            is DeviceWarningEvent.BatteryTemperatureHigh -> {
-                Log.w("DeviceMonitor", "Battery overheating ${event.temperatureC}°C")
-            }
-
-            is DeviceWarningEvent.CpuOverload -> {
-                Log.w("DeviceMonitor", "CPU overloaded ${event.usagePercent}% (cores=${event.coreCount})")
-            }
-
-            is DeviceWarningEvent.MemoryLow -> {
-                Log.w("DeviceMonitor", "Low memory: ${event.availBytes}")
-            }
-
-            is DeviceWarningEvent.StorageLow -> {
-                Log.w("DeviceMonitor", "Low storage: ${event.freeBytes}")
-            }
+            is DeviceRecommendation.PauseWorkload -> encoder.pause()
+            is DeviceRecommendation.ResumeWorkload -> encoder.resume()
+            is DeviceRecommendation.DelayHeavyTask -> scheduler.retryAfter(recommendation.retryAfterMs)
         }
     }
 }
 ```
 
+Built-in behavior:
+
+- `WARM` health -> `ReduceWorkload(..., suggestedScale = 0.8f)`
+- `DEGRADED` health -> `ReduceWorkload(..., suggestedScale = 0.55f)`
+- `CRITICAL` health -> `PauseWorkload(...)`
+- return from `DEGRADED`/`CRITICAL` to `NORMAL` -> `ResumeWorkload(...)`
+
+Recommendation duplicates are throttled using `recommendationCooldownMs`.
+
 ---
 
-# DeviceSnapshot
+## Warning Events
 
 ```kotlin
-data class DeviceSnapshot(
-    val tsMs: Long,
-    val thermalStatus: ThermalLevel,
-    val batteryTempC: Float?,
-    val batteryLevel: Int?,
-    val isCharging: Boolean?,
-    val cpuUsagePercent: Float?,
-    val cpuUsagePerCore: List<Float>?,
-    val cpuFreqKHz: List<Int>?,
-    val memAvailBytes: Long?,
-    val memThresholdBytes: Long?,
-    val memLow: Boolean?,
-    val storageFreeBytes: Long?,
-    val storageTotalBytes: Long?,
-    val networkType: NetworkType?,
-    val thermalZones: List<ThermalZoneReading>,
-    val frameMetrics: FrameMetricsSnapshot?,
-    val networkTraffic: NetworkTrafficSnapshot?,
-    val batteryPower: BatteryPowerSnapshot?,
-    val uptimeMs: Long?,
-    val batteryVoltageMv: Int?,
-    val batteryHealth: BatteryHealth?,
-    val batteryPlugType: PowerSource?
+sealed class DeviceWarningEvent {
+    data class ThermalChanged(...)
+    data class MemoryLow(...)
+    data class StorageLow(...)
+    data class BatteryLow(...)
+    data class BatteryTemperatureHigh(...)
+    data class CpuOverload(...)
+    data class ThermalHeadroomLow(...)
+    data class BatteryDrainHigh(...)
+}
+```
+
+---
+
+## Extended Telemetry
+
+`DeviceSnapshot` includes:
+
+- `thermalZones: List<ThermalZoneReading>`
+- `networkTraffic: NetworkTrafficSnapshot?`
+- `batteryPower: BatteryPowerSnapshot?`
+- `thermalHeadroom: ThermalHeadroomSnapshot?`
+- `batteryDrain: BatteryDrainSnapshot?`
+
+`thermalHeadroom` and `batteryDrain` fields are nullable to stay safe on unsupported Android/OEM implementations.
+
+---
+
+## Workload Session API
+
+Track a workload execution and receive a summarized report:
+
+```kotlin
+val session = monitor.createWorkloadSession(
+    name = "video-export",
+    type = WorkloadType.MEDIA_PROCESSING
 )
+
+session.start()
+// run heavy operation
+val report = session.stop()
 ```
+
+`WorkloadReport` includes:
+
+- `durationMs`
+- `startSnapshot`
+- `endSnapshot`
+- `maxRiskScore`
+- `warningCount`
+- `recommendations`
 
 ---
 
-# Warning Events
-
-```kotlin
-    data class ThermalChanged(val from: ThermalLevel, val to: ThermalLevel)
-    data class MemoryLow(val availBytes: Long, private val thresholdBytes: Long)
-    data class StorageLow(val freeBytes: Long, private val thresholdBytes: Long)
-    data class BatteryLow(val levelPercent: Int, val thresholdPercent: Int, val isCharging: Boolean?)
-    data class BatteryTemperatureHigh(val temperatureC: Float, val thresholdC: Float)
-    data class CpuOverload(val usagePercent: Float, val thresholdPercent: Float, val coreCount: Int)
-```
-
----
-
-# Testing
+## Testing
 
 ```bash
-./gradlew test
+./gradlew :device_monitor:test
 ```
 
-Unit tests cover snapshot scoring, configuration builder behavior, and battery health helpers.
+Coverage includes:
+
+- recommendation generation and throttling
+- battery drain math
+- thermal headroom null safety
+- config builder limits/defaults
+- workload session report aggregation
 
 ---
 
-# Example Use Case
-
-```kotlin
-monitor.start()
-
-monitor.snapshotNow()
-
-monitor.stop()
-```
-
-Use monitoring to:
-
-- pause work if device overheats
-- reduce concurrency when RAM is low
-- warn when storage is almost full
-
----
-
-# Architecture
-
-```
-DeviceMonitor
- ├── System Readers
- │   ├── CPU (/proc/stat)
- │   ├── Memory (ActivityManager)
- │   ├── Storage (StatFs)
- │   ├── Battery (BatteryManager)
- │   ├── Thermal (PowerManager)
- │   └── Network (ConnectivityManager)
- │
- ├── Snapshot Builder
- │
- └── SharedFlow
-     ├── DeviceSnapshot
-     └── DeviceWarningEvent
-```
-
----
-
-# Data Sources
-
-| Source | Purpose |
-|------|------|
-| ActivityManager | Memory info |
-| BatteryManager | Battery level & temperature |
-| PowerManager | Thermal status |
-| StatFs | Storage statistics |
-| /proc/stat | CPU usage |
-| /sys/devices/system/cpu | CPU frequencies |
-
----
-
-# Minimum Requirements
-
-```
-minSdk = 26
-```
-
----
-
-# Roadmap
-
-Planned improvements:
+## Roadmap
 
 - CPU throttling detection
 - GPU monitoring
-- battery discharge rate
-- power consumption estimation
-- performance profiling
+- per-device recommendation tuning profiles
+- recommendation policy plug-ins
+- richer workload session analytics
 
 ---
 
-# License
+## Changelog
+
+### 0.4.0
+
+- Added Adaptive Workload Guard with `DeviceRecommendation` flow.
+- Added `ThermalHeadroomSnapshot` and `BatteryDrainSnapshot`.
+- Added warning events `ThermalHeadroomLow` and `BatteryDrainHigh`.
+- Added workload APIs: `createWorkloadSession`, `WorkloadSession`, `WorkloadReport`, `WorkloadType`.
+- Extended `DeviceMonitorConfig` with recommendation/headroom/drain controls.
+
+### 0.3.0
+
+- Added extended telemetry (`thermalZones`, `networkTraffic`, `batteryPower`, frame metrics support).
+- Added `riskScore()` / `health()` helpers and warning transition throttling.
+
+---
+
+## License
 
 Apache License 2.0
 
 ---
 
-# Author
+## Author
 
 Eric Shvets  
 https://github.com/0dimidrol0

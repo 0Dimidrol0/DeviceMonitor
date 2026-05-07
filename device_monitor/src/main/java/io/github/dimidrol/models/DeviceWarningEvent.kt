@@ -50,4 +50,22 @@ sealed class DeviceWarningEvent {
         val isOverloaded: Boolean
             get() = usagePercent >= thresholdPercent
     }
+
+    data class ThermalHeadroomLow(
+        val currentHeadroom: Float?,
+        val forecastHeadroom: Float?,
+        val threshold: Float,
+        val status: ThermalLevel
+    ) : DeviceWarningEvent() {
+        val isHeadroomRisk: Boolean
+            get() = listOfNotNull(currentHeadroom, forecastHeadroom).any { it <= threshold }
+    }
+
+    data class BatteryDrainHigh(
+        val drainPercentPerHour: Float,
+        val thresholdPercentPerHour: Float
+    ) : DeviceWarningEvent() {
+        val isDrainRisk: Boolean
+            get() = drainPercentPerHour >= thresholdPercentPerHour
+    }
 }
