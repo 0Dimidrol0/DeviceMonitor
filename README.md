@@ -93,6 +93,15 @@ DeviceMonitor.init(
 )
 ```
 
+Use marketplace profile preset:
+
+```kotlin
+DeviceMonitor.init(
+    appContext,
+    DeviceMonitorProfiles.config(MarketplaceAppProfile.REALTIME_GAMING)
+)
+```
+
 ---
 
 ## First Value In 15 Minutes
@@ -174,6 +183,33 @@ Ready-to-copy integration patterns:
 - WebRTC sender and capture adaptation
 
 See: [Adaptive Workload Guard Playbook](docs/adaptive-workload-guard-playbook.md)
+
+---
+
+## Marketplace Profiles (10 Presets)
+
+`DeviceMonitorProfiles` includes ready-to-use configs for common app categories:
+
+- `SOCIAL_SHORT_VIDEO`
+- `VIDEO_STREAMING_ON_DEMAND`
+- `LIVE_STREAMING_CREATOR`
+- `VIDEO_CALL_MESSAGING`
+- `REALTIME_GAMING`
+- `PHOTO_VIDEO_EDITING`
+- `MUSIC_AUDIO_STREAMING`
+- `SHOPPING_ECOMMERCE`
+- `MAPS_NAVIGATION_DELIVERY`
+- `PRODUCTIVITY_COLLABORATION`
+
+Use one as baseline, then override with builder if needed:
+
+```kotlin
+val base = DeviceMonitorProfiles.config(MarketplaceAppProfile.VIDEO_CALL_MESSAGING)
+val custom = base.toBuilder()
+    .samplePeriodMs(1_800L)
+    .batteryTemperatureThresholdC(42f)
+    .build()
+```
 
 ---
 
