@@ -30,7 +30,7 @@ class DeviceMonitorProfilesTest {
 
     @Test
     fun realtimeGamingProfileIsAggressive() {
-        val config = DeviceMonitorProfiles.config(MarketplaceAppProfile.REALTIME_GAMING)
+        val config = DeviceMonitorProfiles.config(AppProfile.REALTIME_GAMING)
 
         assertTrue(config.samplePeriodMs <= 1_500L)
         assertTrue(config.cpuOverloadThresholdPercent <= 72f)

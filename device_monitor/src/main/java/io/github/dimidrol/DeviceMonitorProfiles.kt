@@ -6,7 +6,7 @@ package io.github.dimidrol
  * Use [DeviceMonitorProfiles.config] when you want a production-ready baseline
  * without manual threshold tuning.
  */
-enum class MarketplaceAppProfile {
+enum class AppProfile {
     SOCIAL_SHORT_VIDEO,
     VIDEO_STREAMING_ON_DEMAND,
     LIVE_STREAMING_CREATOR,
@@ -25,13 +25,13 @@ object DeviceMonitorProfiles {
      * Returns all built-in marketplace presets.
      */
     @JvmStatic
-    fun allProfiles(): List<MarketplaceAppProfile> = MarketplaceAppProfile.values().toList()
+    fun allProfiles(): List<AppProfile> = AppProfile.values().toList()
 
     /**
      * Returns a ready-to-use [DeviceMonitorConfig] for the given [profile].
      */
     @JvmStatic
-    fun config(profile: MarketplaceAppProfile): DeviceMonitorConfig {
+    fun config(profile: AppProfile): DeviceMonitorConfig {
         return apply(profile, DeviceMonitorConfig.builder()).build()
     }
 
@@ -40,11 +40,11 @@ object DeviceMonitorProfiles {
      */
     @JvmStatic
     fun apply(
-        profile: MarketplaceAppProfile,
+        profile: AppProfile,
         builder: DeviceMonitorConfig.Builder
     ): DeviceMonitorConfig.Builder {
         return when (profile) {
-            MarketplaceAppProfile.SOCIAL_SHORT_VIDEO -> baseAdaptive(builder)
+            AppProfile.SOCIAL_SHORT_VIDEO -> baseAdaptive(builder)
                 .samplePeriodMs(2_000L)
                 .memoryThresholdMb(384L)
                 .storageThresholdMb(1_536L)
@@ -59,7 +59,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.45f)
                 .healthSmoothingWindowSize(4)
 
-            MarketplaceAppProfile.VIDEO_STREAMING_ON_DEMAND -> baseAdaptive(builder)
+            AppProfile.VIDEO_STREAMING_ON_DEMAND -> baseAdaptive(builder)
                 .samplePeriodMs(2_500L)
                 .memoryThresholdMb(320L)
                 .storageThresholdMb(1_024L)
@@ -74,7 +74,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.35f)
                 .healthSmoothingWindowSize(3)
 
-            MarketplaceAppProfile.LIVE_STREAMING_CREATOR -> baseAdaptive(builder)
+            AppProfile.LIVE_STREAMING_CREATOR -> baseAdaptive(builder)
                 .samplePeriodMs(1_500L)
                 .memoryThresholdMb(512L)
                 .storageThresholdMb(1_536L)
@@ -89,7 +89,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.5f)
                 .healthSmoothingWindowSize(5)
 
-            MarketplaceAppProfile.VIDEO_CALL_MESSAGING -> baseAdaptive(builder)
+            AppProfile.VIDEO_CALL_MESSAGING -> baseAdaptive(builder)
                 .samplePeriodMs(2_000L)
                 .memoryThresholdMb(384L)
                 .storageThresholdMb(1_024L)
@@ -104,7 +104,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.45f)
                 .healthSmoothingWindowSize(4)
 
-            MarketplaceAppProfile.REALTIME_GAMING -> baseAdaptive(builder)
+            AppProfile.REALTIME_GAMING -> baseAdaptive(builder)
                 .samplePeriodMs(1_200L)
                 .memoryThresholdMb(640L)
                 .storageThresholdMb(2_048L)
@@ -119,7 +119,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.55f)
                 .healthSmoothingWindowSize(5)
 
-            MarketplaceAppProfile.PHOTO_VIDEO_EDITING -> baseAdaptive(builder)
+            AppProfile.PHOTO_VIDEO_EDITING -> baseAdaptive(builder)
                 .samplePeriodMs(2_000L)
                 .memoryThresholdMb(768L)
                 .storageThresholdMb(4_096L)
@@ -134,7 +134,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.5f)
                 .healthSmoothingWindowSize(4)
 
-            MarketplaceAppProfile.MUSIC_AUDIO_STREAMING -> baseAdaptive(builder)
+            AppProfile.MUSIC_AUDIO_STREAMING -> baseAdaptive(builder)
                 .samplePeriodMs(4_000L)
                 .memoryThresholdMb(256L)
                 .storageThresholdMb(1_024L)
@@ -149,7 +149,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.3f)
                 .healthSmoothingWindowSize(3)
 
-            MarketplaceAppProfile.SHOPPING_ECOMMERCE -> baseAdaptive(builder)
+            AppProfile.SHOPPING_ECOMMERCE -> baseAdaptive(builder)
                 .samplePeriodMs(5_000L)
                 .memoryThresholdMb(320L)
                 .storageThresholdMb(1_536L)
@@ -164,7 +164,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.25f)
                 .healthSmoothingWindowSize(3)
 
-            MarketplaceAppProfile.MAPS_NAVIGATION_DELIVERY -> baseAdaptive(builder)
+            AppProfile.MAPS_NAVIGATION_DELIVERY -> baseAdaptive(builder)
                 .samplePeriodMs(3_000L)
                 .memoryThresholdMb(384L)
                 .storageThresholdMb(1_536L)
@@ -179,7 +179,7 @@ object DeviceMonitorProfiles {
                 .riskScoreEmaAlpha(0.4f)
                 .healthSmoothingWindowSize(4)
 
-            MarketplaceAppProfile.PRODUCTIVITY_COLLABORATION -> baseAdaptive(builder)
+            AppProfile.PRODUCTIVITY_COLLABORATION -> baseAdaptive(builder)
                 .samplePeriodMs(5_000L)
                 .memoryThresholdMb(320L)
                 .storageThresholdMb(1_024L)

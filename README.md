@@ -98,7 +98,7 @@ Use marketplace profile preset:
 ```kotlin
 DeviceMonitor.init(
     appContext,
-    DeviceMonitorProfiles.config(MarketplaceAppProfile.REALTIME_GAMING)
+    DeviceMonitorProfiles.config(AppProfile.REALTIME_GAMING)
 )
 ```
 
@@ -204,7 +204,7 @@ See: [Adaptive Workload Guard Playbook](docs/adaptive-workload-guard-playbook.md
 Use one as baseline, then override with builder if needed:
 
 ```kotlin
-val base = DeviceMonitorProfiles.config(MarketplaceAppProfile.VIDEO_CALL_MESSAGING)
+val base = DeviceMonitorProfiles.config(AppProfile.VIDEO_CALL_MESSAGING)
 val custom = base.toBuilder()
     .samplePeriodMs(1_800L)
     .batteryTemperatureThresholdC(42f)
