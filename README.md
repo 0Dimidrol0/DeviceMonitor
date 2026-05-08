@@ -83,7 +83,12 @@ DeviceMonitor.init(
         .enableThermalHeadroom(true)
         .enableBatteryDrain(true)
         .thermalHeadroomForecastSeconds(10)
+        .thermalHeadroomLowThreshold(0.2f)
         .batteryDrainHighThresholdPercentPerHour(20f)
+        .batteryDrainCriticalThresholdPercentPerHour(35f)
+        .enableMetricSmoothing(true)
+        .riskScoreEmaAlpha(0.35f)
+        .healthSmoothingWindowSize(3)
         .build()
 )
 ```
@@ -121,6 +126,8 @@ Built-in behavior:
 - return from `DEGRADED`/`CRITICAL` to `NORMAL` -> `ResumeWorkload(...)`
 
 Recommendation duplicates are throttled using `recommendationCooldownMs`.
+
+For advanced behavior you can plug in your own recommendation strategy with `DeviceMonitorConfig.recommendationPolicy`.
 
 ---
 
@@ -176,6 +183,10 @@ val report = session.stop()
 - `startSnapshot`
 - `endSnapshot`
 - `maxRiskScore`
+- `avgRiskScore`
+- `timeInStatesMs`
+- `peakBatteryTempC`
+- `minThermalHeadroom`
 - `warningCount`
 - `recommendations`
 
@@ -216,6 +227,10 @@ Coverage includes:
 - Added warning events `ThermalHeadroomLow` and `BatteryDrainHigh`.
 - Added workload APIs: `createWorkloadSession`, `WorkloadSession`, `WorkloadReport`, `WorkloadType`.
 - Extended `DeviceMonitorConfig` with recommendation/headroom/drain controls.
+- Added pluggable `RecommendationPolicy`.
+- Added optional metric smoothing (EMA + rolling window) for recommendation health evaluation.
+- Added richer workload report analytics (`avgRiskScore`, health-state time, thermal/battery peaks).
+- Split sensor reads into internal provider abstractions for cleaner extension points.
 
 ### 0.3.0
 

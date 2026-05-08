@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import io.github.dimidrol.BYTES_IN_MB
 import io.github.dimidrol.DeviceMonitor
 import io.github.dimidrol.DeviceMonitorConfig
+import io.github.dimidrol.RecommendationContext
 import io.github.dimidrol.WorkloadReport
 import io.github.dimidrol.WorkloadSession
 import io.github.dimidrol.WorkloadType
@@ -40,8 +41,6 @@ import io.github.dimidrol.models.DeviceWarningEvent
 import io.github.dimidrol.models.NetworkTrafficSnapshot
 import io.github.dimidrol.models.NetworkType
 import io.github.dimidrol.models.PowerSource
-import io.github.dimidrol.models.RecommendationReason
-import io.github.dimidrol.models.RecommendationSeverity
 import io.github.dimidrol.models.ThermalHeadroomSnapshot
 import io.github.dimidrol.models.ThermalLevel
 import io.github.dimidrol.models.ThermalZoneReading
@@ -75,7 +74,6 @@ private const val PROCESS_STAT_STIME_INDEX = 14
 private const val PROCESS_STAT_CUTIME_INDEX = 15
 private const val PROCESS_STAT_CSTIME_INDEX = 16
 private const val PROCESS_STAT_SPLIT_LIMIT = PROCESS_STAT_CSTIME_INDEX + 2
-private const val THERMAL_HEADROOM_LOW_THRESHOLD = 0.2f
 private const val POWER_WATTS_DIVIDER = 1_000_000_000f
 private const val MILLIS_IN_HOUR = 3_600_000L
 private const val MAX_THERMAL_HEADROOM_FORECAST_SECONDS = 60
@@ -159,6 +157,28 @@ internal object DeviceMonitorImpl : DeviceMonitor {
 
     private var previousRecommendationHealth: DeviceHealth? = null
     private var lastDrainSample: DrainSample? = null
+    private var recommendationPolicy = currentConfig.recommendationPolicy
+
+    private val riskScoreEma = ExponentialMovingAverage(currentConfig.riskScoreEmaAlpha)
+    private val healthSmoother = RollingHealthSmoother(currentConfig.healthSmoothingWindowSize)
+
+    private var cpuSensorProvider: CpuSensorProvider = DelegatingCpuSensorProvider(
+        cpuUsageReader = ::readCpuUsage,
+        cpuUsagePerCoreReader = ::readCpuUsagePerCore,
+        cpuFrequenciesReader = ::readCpuFreqKHzPerCore
+    )
+    private var thermalSensorProvider: ThermalSensorProvider = DelegatingThermalSensorProvider(
+        thermalLevelReader = ::readThermalLevel,
+        thermalZonesReader = ::readThermalZones,
+        thermalHeadroomReader = ::readThermalHeadroom
+    )
+    private var batterySensorProvider: BatterySensorProvider = DelegatingBatterySensorProvider(
+        batterySnapshotReader = ::collectBatterySensorSnapshot
+    )
+    private var networkSensorProvider: NetworkSensorProvider = DelegatingNetworkSensorProvider(
+        networkTypeReader = ::readNetworkType,
+        networkTrafficReader = ::readNetworkTraffic
+    )
 
     private val warningEventThrottle = WarningEventThrottle()
     private val recommendationEventThrottle = RecommendationEventThrottle(currentConfig.recommendationCooldownMs)
@@ -184,6 +204,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         cpuOverloadThresholdPercent = config.cpuOverloadThresholdPercent
         batteryLowThresholdPercent = config.batteryLowThresholdPercent
         batteryTempThresholdC = config.batteryTemperatureThresholdC
+        recommendationPolicy = config.recommendationPolicy
+        riskScoreEma.updateAlpha(config.riskScoreEmaAlpha)
+        healthSmoother.updateWindowSize(config.healthSmoothingWindowSize)
         recommendationEventThrottle.updateCooldown(config.recommendationCooldownMs)
     }
 
@@ -211,6 +234,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         warningEventThrottle.reset()
         recommendationEventThrottle.reset()
         previousRecommendationHealth = null
+        riskScoreEma.reset()
+        healthSmoother.reset()
+        lastDrainSample = null
 
         pollJob = scope.launch {
             while (isActive) {
@@ -249,6 +275,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         warningEventThrottle.reset()
         recommendationEventThrottle.reset()
         previousRecommendationHealth = null
+        riskScoreEma.reset()
+        healthSmoother.reset()
+        lastDrainSample = null
         detachThermalListener()
         detachBatteryReceiver()
     }
@@ -351,40 +380,54 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private fun collectSnapshot(): DeviceSnapshot {
         val timestamp = System.currentTimeMillis()
         val thermal = if (currentConfig.enableThermal) {
-            readThermalLevel()
+            thermalSensorProvider.readThermalLevel()
         } else {
             ThermalLevel.UNKNOWN
         }
-        val thermalHeadroom = readThermalHeadroom(thermal)
+        val thermalHeadroom = if (currentConfig.enableThermal) {
+            thermalSensorProvider.readThermalHeadroom(thermal)
+        } else {
+            null
+        }
         val (availMem, thresholdMem, lowMem) = readMemInfo()
         val (freeStorage, totalStorage) = readStorageInfo()
-        val cpuFreqs = readCpuFreqKHzPerCore()
-        val cpuUsage = readCpuUsage()
-        val cpuUsagePerCore = readCpuUsagePerCore()
+        val cpuFreqs = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuFrequenciesKHz()
+        } else {
+            null
+        }
+        val cpuUsage = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuUsagePercent()
+        } else {
+            null
+        }
+        val cpuUsagePerCore = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuUsagePerCore()
+        } else {
+            null
+        }
         val network = if (currentConfig.enableNetwork) {
-            readNetworkType()
+            networkSensorProvider.readNetworkType()
         } else {
             NetworkType.UNKNOWN
         }
         val uptime = readUptimeMs()
         val thermalZones = if (currentConfig.enableThermal) {
-            readThermalZones() ?: emptyList()
+            thermalSensorProvider.readThermalZones() ?: emptyList()
         } else {
             emptyList()
         }
         val frameMetrics = frameMetricsTracker?.snapshot()
         val networkTraffic = if (currentConfig.enableNetwork) {
-            readNetworkTraffic()
+            networkSensorProvider.readNetworkTraffic()
         } else {
             null
         }
-        val batteryReadings = if (currentConfig.enableBattery) {
-            readBatteryReadings()
+        val batterySnapshot = if (currentConfig.enableBattery) {
+            batterySensorProvider.readBatterySnapshot()
         } else {
-            null
+            BatterySensorSnapshot(power = null, drain = null)
         }
-        val batteryPower = batteryReadings?.toBatteryPowerSnapshot()
-        val batteryDrain = readBatteryDrainSnapshot(batteryReadings)
 
         return DeviceSnapshot(
             tsMs = timestamp,
@@ -404,13 +447,13 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             thermalZones = thermalZones,
             frameMetrics = frameMetrics,
             networkTraffic = networkTraffic,
-            batteryPower = batteryPower,
+            batteryPower = batterySnapshot.power,
             batteryVoltageMv = lastBatteryVoltageMv,
             batteryHealth = lastBatteryHealth,
             batteryPlugType = lastBatteryPlugType,
             uptimeMs = uptime,
             thermalHeadroom = thermalHeadroom,
-            batteryDrain = batteryDrain
+            batteryDrain = batterySnapshot.drain
         )
     }
 
@@ -512,16 +555,17 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         }
 
         val thermalHeadroom = snapshot.thermalHeadroom
+        val thermalHeadroomThreshold = currentConfig.thermalHeadroomLowThreshold
         val thermalHeadroomRisk = currentConfig.enableThermalHeadroom &&
             thermalHeadroom != null &&
             listOfNotNull(thermalHeadroom.currentHeadroom, thermalHeadroom.forecastHeadroom)
-                .any { it <= THERMAL_HEADROOM_LOW_THRESHOLD }
+                .any { it <= thermalHeadroomThreshold }
         if (warningEventThrottle.shouldEmitThermalHeadroomLow(isRiskActive = thermalHeadroomRisk)) {
             emitWarningEvent(
                 DeviceWarningEvent.ThermalHeadroomLow(
                     currentHeadroom = thermalHeadroom?.currentHeadroom,
                     forecastHeadroom = thermalHeadroom?.forecastHeadroom,
-                    threshold = THERMAL_HEADROOM_LOW_THRESHOLD,
+                    threshold = thermalHeadroomThreshold,
                     status = thermalHeadroom?.status ?: snapshot.thermalStatus
                 )
             )
@@ -531,7 +575,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     }
 
     private fun emitRecommendation(snapshot: DeviceSnapshot) {
-        val currentHealth = snapshot.health()
+        val currentHealth = evaluateRecommendationHealth(snapshot)
 
         if (!currentConfig.enableRecommendations) {
             previousRecommendationHealth = currentHealth
@@ -539,9 +583,15 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             return
         }
 
-        val recommendation = recommendationForHealth(
-            currentHealth = currentHealth,
-            previousHealth = previousRecommendationHealth
+        val recommendation = recommendationPolicy.recommend(
+            RecommendationContext(
+                snapshot = snapshot,
+                currentHealth = currentHealth,
+                previousHealth = previousRecommendationHealth,
+                thermalHeadroomLowThreshold = currentConfig.thermalHeadroomLowThreshold,
+                batteryDrainCriticalThresholdPercentPerHour = currentConfig.batteryDrainCriticalThresholdPercentPerHour,
+                recommendationCooldownMs = currentConfig.recommendationCooldownMs
+            )
         )
 
         val key = recommendation?.throttleKey()
@@ -555,9 +605,31 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         previousRecommendationHealth = currentHealth
     }
 
+    private fun evaluateRecommendationHealth(snapshot: DeviceSnapshot): DeviceHealth {
+        if (!currentConfig.enableMetricSmoothing) {
+            return snapshot.health()
+        }
+
+        val rawScore = snapshot.riskScore().toFloat()
+        val smoothedScore = riskScoreEma.update(rawScore)
+        val emaHealth = healthFromRiskScore(smoothedScore)
+        return healthSmoother.add(emaHealth)
+    }
+
     private fun emitWarningEvent(event: DeviceWarningEvent) {
         _warningEvents.tryEmit(event)
         recordWarningForSessions()
+    }
+
+    private fun collectBatterySensorSnapshot(): BatterySensorSnapshot {
+        if (!currentConfig.enableBattery) {
+            return BatterySensorSnapshot(power = null, drain = null)
+        }
+
+        val readings = readBatteryReadings()
+        val power = readings?.toBatteryPowerSnapshot()
+        val drain = readBatteryDrainSnapshot(readings)
+        return BatterySensorSnapshot(power = power, drain = drain)
     }
 
     private fun readThermalLevel(): ThermalLevel {
@@ -1078,7 +1150,14 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         private var startedAtMs = 0L
         private var startSnapshot: DeviceSnapshot? = null
         private var maxRiskScore = 0
+        private var riskScoreTotal = 0L
+        private var riskSampleCount = 0
         private var warningCount = 0
+        private var lastRecordedHealth: DeviceHealth? = null
+        private var lastRecordedAtMs = 0L
+        private val timeInStatesMs = linkedMapOf<DeviceHealth, Long>()
+        private var peakBatteryTempC: Float? = null
+        private var minThermalHeadroom: Float? = null
         private val recommendations = mutableListOf<DeviceRecommendation>()
 
         override fun start() {
@@ -1091,8 +1170,16 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 startedAtMs = startedAt
                 startSnapshot = initialSnapshot
                 maxRiskScore = initialSnapshot?.riskScore() ?: 0
+                riskScoreTotal = initialSnapshot?.riskScore()?.toLong().orDefault()
+                riskSampleCount = if (initialSnapshot != null) 1 else 0
                 warningCount = 0
+                peakBatteryTempC = initialSnapshot?.batteryTempC
+                minThermalHeadroom = initialSnapshot?.thermalHeadroom
+                    ?.let { listOfNotNull(it.currentHeadroom, it.forecastHeadroom).minOrNull() }
                 recommendations.clear()
+                timeInStatesMs.clear()
+                lastRecordedAtMs = initialSnapshot?.tsMs ?: startedAt
+                lastRecordedHealth = initialSnapshot?.health()
             }
 
             DeviceMonitorImpl.registerWorkloadSession(this)
@@ -1107,6 +1194,21 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             return synchronized(lock) {
                 val effectiveStart = startedAtMs.takeIf { it > 0L } ?: stoppedAtMs
                 val durationMs = (stoppedAtMs - effectiveStart).coerceAtLeast(0L)
+                val averageRiskScore = if (riskSampleCount > 0) {
+                    riskScoreTotal.toFloat() / riskSampleCount.toFloat()
+                } else {
+                    0f
+                }
+
+                if (lastRecordedHealth != null) {
+                    val lastTs = lastRecordedAtMs.takeIf { it > 0L } ?: effectiveStart
+                    val fallbackEndTs = finalSnapshot?.tsMs ?: stoppedAtMs
+                    val delta = (fallbackEndTs - lastTs).coerceAtLeast(0L)
+                    if (delta > 0L) {
+                        val state = requireNotNull(lastRecordedHealth)
+                        timeInStatesMs[state] = (timeInStatesMs[state] ?: 0L) + delta
+                    }
+                }
 
                 val report = WorkloadReport(
                     name = name,
@@ -1115,6 +1217,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     startSnapshot = startSnapshot,
                     endSnapshot = finalSnapshot,
                     maxRiskScore = maxRiskScore,
+                    avgRiskScore = averageRiskScore,
+                    timeInStatesMs = timeInStatesMs.toMap(),
+                    peakBatteryTempC = peakBatteryTempC,
+                    minThermalHeadroom = minThermalHeadroom,
                     warningCount = warningCount,
                     recommendations = recommendations.toList()
                 )
@@ -1123,8 +1229,15 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 startedAtMs = 0L
                 startSnapshot = null
                 maxRiskScore = 0
+                riskScoreTotal = 0L
+                riskSampleCount = 0
                 warningCount = 0
+                lastRecordedAtMs = 0L
+                lastRecordedHealth = null
+                peakBatteryTempC = null
+                minThermalHeadroom = null
                 recommendations.clear()
+                timeInStatesMs.clear()
 
                 report
             }
@@ -1133,7 +1246,32 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         fun recordSnapshot(snapshot: DeviceSnapshot) {
             synchronized(lock) {
                 if (!running) return
-                maxRiskScore = maxOf(maxRiskScore, snapshot.riskScore())
+
+                val risk = snapshot.riskScore()
+                val health = snapshot.health()
+                maxRiskScore = maxOf(maxRiskScore, risk)
+                riskScoreTotal += risk.toLong()
+                riskSampleCount += 1
+
+                val previousHealth = lastRecordedHealth
+                if (previousHealth != null) {
+                    val delta = (snapshot.tsMs - lastRecordedAtMs).coerceAtLeast(0L)
+                    if (delta > 0L) {
+                        timeInStatesMs[previousHealth] = (timeInStatesMs[previousHealth] ?: 0L) + delta
+                    }
+                }
+                lastRecordedHealth = health
+                lastRecordedAtMs = snapshot.tsMs
+
+                snapshot.batteryTempC?.let { temp ->
+                    peakBatteryTempC = maxOf(peakBatteryTempC ?: temp, temp)
+                }
+                listOfNotNull(
+                    snapshot.thermalHeadroom?.currentHeadroom,
+                    snapshot.thermalHeadroom?.forecastHeadroom
+                ).minOrNull()?.let { candidate ->
+                    minThermalHeadroom = minOf(minThermalHeadroom ?: candidate, candidate)
+                }
             }
         }
 
@@ -1148,40 +1286,6 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             synchronized(lock) {
                 if (!running) return
                 recommendations += recommendation
-            }
-        }
-    }
-}
-
-internal fun recommendationForHealth(
-    currentHealth: DeviceHealth,
-    previousHealth: DeviceHealth?
-): DeviceRecommendation? {
-    return when (currentHealth) {
-        DeviceHealth.WARM -> DeviceRecommendation.ReduceWorkload(
-            reason = RecommendationReason.HEALTH_WARM,
-            severity = RecommendationSeverity.MEDIUM,
-            suggestedScale = 0.8f
-        )
-
-        DeviceHealth.DEGRADED -> DeviceRecommendation.ReduceWorkload(
-            reason = RecommendationReason.HEALTH_DEGRADED,
-            severity = RecommendationSeverity.HIGH,
-            suggestedScale = 0.55f
-        )
-
-        DeviceHealth.CRITICAL -> DeviceRecommendation.PauseWorkload(
-            reason = RecommendationReason.HEALTH_CRITICAL,
-            severity = RecommendationSeverity.CRITICAL
-        )
-
-        DeviceHealth.NORMAL -> {
-            if (previousHealth == DeviceHealth.DEGRADED || previousHealth == DeviceHealth.CRITICAL) {
-                DeviceRecommendation.ResumeWorkload(
-                    reason = RecommendationReason.HEALTH_RECOVERED
-                )
-            } else {
-                null
             }
         }
     }

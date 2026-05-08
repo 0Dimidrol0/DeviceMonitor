@@ -12,7 +12,13 @@ data class DeviceMonitorConfig(
     val enableBatteryDrain: Boolean = DEFAULT_ENABLE_BATTERY_DRAIN,
     val recommendationCooldownMs: Long = DEFAULT_RECOMMENDATION_COOLDOWN_MS,
     val thermalHeadroomForecastSeconds: Int = DEFAULT_THERMAL_HEADROOM_FORECAST_SECONDS,
+    val thermalHeadroomLowThreshold: Float = DEFAULT_THERMAL_HEADROOM_LOW_THRESHOLD,
     val batteryDrainHighThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_HIGH_THRESHOLD_PERCENT_PER_HOUR,
+    val batteryDrainCriticalThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_CRITICAL_THRESHOLD_PERCENT_PER_HOUR,
+    val enableMetricSmoothing: Boolean = DEFAULT_ENABLE_METRIC_SMOOTHING,
+    val riskScoreEmaAlpha: Float = DEFAULT_RISK_SCORE_EMA_ALPHA,
+    val healthSmoothingWindowSize: Int = DEFAULT_HEALTH_SMOOTHING_WINDOW_SIZE,
+    val recommendationPolicy: RecommendationPolicy = DefaultRecommendationPolicy,
     val enableThermal: Boolean = true,
     val enableBattery: Boolean = true,
     val enableCpu: Boolean = true,
@@ -33,7 +39,13 @@ data class DeviceMonitorConfig(
         enableBatteryDrain(enableBatteryDrain)
         recommendationCooldownMs(recommendationCooldownMs)
         thermalHeadroomForecastSeconds(thermalHeadroomForecastSeconds)
+        thermalHeadroomLowThreshold(thermalHeadroomLowThreshold)
         batteryDrainHighThresholdPercentPerHour(batteryDrainHighThresholdPercentPerHour)
+        batteryDrainCriticalThresholdPercentPerHour(batteryDrainCriticalThresholdPercentPerHour)
+        enableMetricSmoothing(enableMetricSmoothing)
+        riskScoreEmaAlpha(riskScoreEmaAlpha)
+        healthSmoothingWindowSize(healthSmoothingWindowSize)
+        recommendationPolicy(recommendationPolicy)
         enableThermal(enableThermal)
         enableBattery(enableBattery)
         enableCpu(enableCpu)
@@ -58,7 +70,13 @@ data class DeviceMonitorConfig(
         private var enableBatteryDrain: Boolean = DEFAULT_ENABLE_BATTERY_DRAIN
         private var recommendationCooldownMs: Long = DEFAULT_RECOMMENDATION_COOLDOWN_MS
         private var thermalHeadroomForecastSeconds: Int = DEFAULT_THERMAL_HEADROOM_FORECAST_SECONDS
+        private var thermalHeadroomLowThreshold: Float = DEFAULT_THERMAL_HEADROOM_LOW_THRESHOLD
         private var batteryDrainHighThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_HIGH_THRESHOLD_PERCENT_PER_HOUR
+        private var batteryDrainCriticalThresholdPercentPerHour: Float = DEFAULT_BATTERY_DRAIN_CRITICAL_THRESHOLD_PERCENT_PER_HOUR
+        private var enableMetricSmoothing: Boolean = DEFAULT_ENABLE_METRIC_SMOOTHING
+        private var riskScoreEmaAlpha: Float = DEFAULT_RISK_SCORE_EMA_ALPHA
+        private var healthSmoothingWindowSize: Int = DEFAULT_HEALTH_SMOOTHING_WINDOW_SIZE
+        private var recommendationPolicy: RecommendationPolicy = DefaultRecommendationPolicy
         private var enableThermal: Boolean = true
         private var enableBattery: Boolean = true
         private var enableCpu: Boolean = true
@@ -110,8 +128,32 @@ data class DeviceMonitorConfig(
             thermalHeadroomForecastSeconds = value
         }
 
+        fun thermalHeadroomLowThreshold(value: Float) = apply {
+            thermalHeadroomLowThreshold = value
+        }
+
         fun batteryDrainHighThresholdPercentPerHour(value: Float) = apply {
             batteryDrainHighThresholdPercentPerHour = value
+        }
+
+        fun batteryDrainCriticalThresholdPercentPerHour(value: Float) = apply {
+            batteryDrainCriticalThresholdPercentPerHour = value
+        }
+
+        fun enableMetricSmoothing(enabled: Boolean) = apply {
+            enableMetricSmoothing = enabled
+        }
+
+        fun riskScoreEmaAlpha(value: Float) = apply {
+            riskScoreEmaAlpha = value
+        }
+
+        fun healthSmoothingWindowSize(value: Int) = apply {
+            healthSmoothingWindowSize = value
+        }
+
+        fun recommendationPolicy(value: RecommendationPolicy) = apply {
+            recommendationPolicy = value
         }
 
         fun enableThermal(enabled: Boolean) = apply {
@@ -139,6 +181,7 @@ data class DeviceMonitorConfig(
         }
 
         fun build(): DeviceMonitorConfig {
+            val boundedHighDrain = batteryDrainHighThresholdPercentPerHour.coerceAtLeast(0f)
             return DeviceMonitorConfig(
                 samplePeriodMs = samplePeriodMs.coerceAtLeast(1L),
                 memoryThresholdMb = memoryThresholdMb.coerceAtLeast(0L),
@@ -151,7 +194,14 @@ data class DeviceMonitorConfig(
                 enableBatteryDrain = enableBatteryDrain,
                 recommendationCooldownMs = recommendationCooldownMs.coerceAtLeast(0L),
                 thermalHeadroomForecastSeconds = thermalHeadroomForecastSeconds.coerceAtLeast(0),
-                batteryDrainHighThresholdPercentPerHour = batteryDrainHighThresholdPercentPerHour.coerceAtLeast(0f),
+                thermalHeadroomLowThreshold = thermalHeadroomLowThreshold.coerceAtLeast(0f),
+                batteryDrainHighThresholdPercentPerHour = boundedHighDrain,
+                batteryDrainCriticalThresholdPercentPerHour = batteryDrainCriticalThresholdPercentPerHour
+                    .coerceAtLeast(boundedHighDrain),
+                enableMetricSmoothing = enableMetricSmoothing,
+                riskScoreEmaAlpha = riskScoreEmaAlpha.coerceIn(0f, 1f),
+                healthSmoothingWindowSize = healthSmoothingWindowSize.coerceAtLeast(1),
+                recommendationPolicy = recommendationPolicy,
                 enableThermal = enableThermal,
                 enableBattery = enableBattery,
                 enableCpu = enableCpu,

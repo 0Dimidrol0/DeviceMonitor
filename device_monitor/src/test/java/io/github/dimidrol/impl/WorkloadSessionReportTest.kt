@@ -6,9 +6,11 @@ import io.github.dimidrol.models.DeviceSnapshot
 import io.github.dimidrol.models.NetworkType
 import io.github.dimidrol.models.RecommendationReason
 import io.github.dimidrol.models.RecommendationSeverity
+import io.github.dimidrol.models.ThermalHeadroomSnapshot
 import io.github.dimidrol.models.ThermalLevel
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class WorkloadSessionReportTest {
@@ -21,7 +23,24 @@ class WorkloadSessionReportTest {
         )
 
         session.start()
-        session.recordSnapshot(buildSnapshot(riskThermal = ThermalLevel.SEVERE, cpuUsage = 92f))
+        session.recordSnapshot(
+            buildSnapshot(
+                tsMs = 1_000L,
+                riskThermal = ThermalLevel.MODERATE,
+                cpuUsage = 68f,
+                batteryTemp = 41f,
+                headroom = 0.35f
+            )
+        )
+        session.recordSnapshot(
+            buildSnapshot(
+                tsMs = 3_000L,
+                riskThermal = ThermalLevel.SEVERE,
+                cpuUsage = 92f,
+                batteryTemp = 49f,
+                headroom = 0.12f
+            )
+        )
         session.recordWarning()
         session.recordWarning()
         session.recordRecommendation(
@@ -40,13 +59,25 @@ class WorkloadSessionReportTest {
         assertEquals(2, report.warningCount)
         assertEquals(1, report.recommendations.size)
         assertTrue(report.maxRiskScore > 0)
+        assertTrue(report.avgRiskScore > 0f)
+        assertTrue(report.timeInStatesMs.isNotEmpty())
+        assertNotNull(report.peakBatteryTempC)
+        assertEquals(49f, report.peakBatteryTempC)
+        assertNotNull(report.minThermalHeadroom)
+        assertEquals(0.12f, report.minThermalHeadroom)
     }
 
-    private fun buildSnapshot(riskThermal: ThermalLevel, cpuUsage: Float): DeviceSnapshot {
+    private fun buildSnapshot(
+        tsMs: Long,
+        riskThermal: ThermalLevel,
+        cpuUsage: Float,
+        batteryTemp: Float,
+        headroom: Float
+    ): DeviceSnapshot {
         return DeviceSnapshot(
-            tsMs = 0L,
+            tsMs = tsMs,
             thermalStatus = riskThermal,
-            batteryTempC = 47f,
+            batteryTempC = batteryTemp,
             batteryLevel = 12,
             isCharging = false,
             cpuUsagePercent = cpuUsage,
@@ -57,7 +88,13 @@ class WorkloadSessionReportTest {
             memLow = true,
             storageFreeBytes = 100L,
             storageTotalBytes = 1_000L,
-            networkType = NetworkType.WIFI
+            networkType = NetworkType.WIFI,
+            thermalHeadroom = ThermalHeadroomSnapshot(
+                currentHeadroom = headroom,
+                forecastHeadroom = headroom + 0.05f,
+                forecastSeconds = 10,
+                status = riskThermal
+            )
         )
     }
 }

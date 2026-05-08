@@ -1,6 +1,7 @@
 package io.github.dimidrol
 
 import io.github.dimidrol.models.DeviceRecommendation
+import io.github.dimidrol.models.DeviceHealth
 import io.github.dimidrol.models.DeviceSnapshot
 
 data class WorkloadReport(
@@ -10,6 +11,10 @@ data class WorkloadReport(
     val startSnapshot: DeviceSnapshot?,
     val endSnapshot: DeviceSnapshot?,
     val maxRiskScore: Int,
+    val avgRiskScore: Float,
+    val timeInStatesMs: Map<DeviceHealth, Long>,
+    val peakBatteryTempC: Float?,
+    val minThermalHeadroom: Float?,
     val warningCount: Int,
     val recommendations: List<DeviceRecommendation>
 )
