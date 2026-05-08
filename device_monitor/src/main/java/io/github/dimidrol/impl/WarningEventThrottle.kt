@@ -1,23 +1,25 @@
 package io.github.dimidrol.impl
 
+import io.github.dimidrol.common.DEFAULT_BOOLEAN
+
 internal class WarningEventThrottle {
 
-    private var memoryLowReported = false
-    private var storageLowReported = false
-    private var batteryLowReported = false
-    private var batteryTempReported = false
-    private var cpuOverloadReported = false
-    private var thermalHeadroomReported = false
-    private var batteryDrainReported = false
+    private var memoryLowReported = DEFAULT_BOOLEAN
+    private var storageLowReported = DEFAULT_BOOLEAN
+    private var batteryLowReported = DEFAULT_BOOLEAN
+    private var batteryTempReported = DEFAULT_BOOLEAN
+    private var cpuOverloadReported = DEFAULT_BOOLEAN
+    private var thermalHeadroomReported = DEFAULT_BOOLEAN
+    private var batteryDrainReported = DEFAULT_BOOLEAN
 
     fun reset() {
-        memoryLowReported = false
-        storageLowReported = false
-        batteryLowReported = false
-        batteryTempReported = false
-        cpuOverloadReported = false
-        thermalHeadroomReported = false
-        batteryDrainReported = false
+        memoryLowReported = DEFAULT_BOOLEAN
+        storageLowReported = DEFAULT_BOOLEAN
+        batteryLowReported = DEFAULT_BOOLEAN
+        batteryTempReported = DEFAULT_BOOLEAN
+        cpuOverloadReported = DEFAULT_BOOLEAN
+        thermalHeadroomReported = DEFAULT_BOOLEAN
+        batteryDrainReported = DEFAULT_BOOLEAN
     }
 
     fun shouldEmitMemoryLow(isRiskActive: Boolean): Boolean {
@@ -75,12 +77,12 @@ internal class WarningEventThrottle {
         updateReported: (Boolean) -> Unit
     ): Boolean {
         if (!isRiskActive) {
-            updateReported(false)
-            return false
+            updateReported(DEFAULT_BOOLEAN)
+            return DEFAULT_BOOLEAN
         }
 
         if (isAlreadyReported) {
-            return false
+            return DEFAULT_BOOLEAN
         }
 
         updateReported(true)

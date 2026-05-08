@@ -3,6 +3,8 @@ package io.github.dimidrol.sample
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.dimidrol.DeviceMonitor
+import io.github.dimidrol.common.DEFAULT_BOOLEAN
+import io.github.dimidrol.common.DEFAULT_INT
 import io.github.dimidrol.models.DeviceSnapshot
 import io.github.dimidrol.models.DeviceWarningEvent
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +25,10 @@ data class WarningUiItem(
 )
 
 data class MonitorUiState(
-    val isMonitoring: Boolean = false,
+    val isMonitoring: Boolean = DEFAULT_BOOLEAN,
     val lastSnapshot: DeviceSnapshot? = null,
     val warningItems: List<WarningUiItem> = emptyList(),
-    val sampleCount: Int = 0,
+    val sampleCount: Int = DEFAULT_INT,
     val lastUpdatedAtMs: Long? = null,
     val sessionStartedAtMs: Long? = null
 )
@@ -37,7 +39,7 @@ class DeviceMonitorViewModel : ViewModel() {
     val uiState = _uiState.asStateFlow()
 
     private var monitor: DeviceMonitor? = null
-    private var monitorBound = false
+    private var monitorBound = DEFAULT_BOOLEAN
 
     fun bindMonitor(monitor: DeviceMonitor) {
         if (monitorBound) return
@@ -61,7 +63,7 @@ class DeviceMonitorViewModel : ViewModel() {
 
     fun stopMonitoring() {
         monitor?.stop()
-        _uiState.update { it.copy(isMonitoring = false) }
+        _uiState.update { it.copy(isMonitoring = DEFAULT_BOOLEAN) }
     }
 
     fun takeSnapshotNow() {

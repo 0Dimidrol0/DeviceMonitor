@@ -1,5 +1,9 @@
 package io.github.dimidrol
 
+import io.github.dimidrol.common.DEFAULT_FLOAT
+import io.github.dimidrol.common.DEFAULT_INT
+import io.github.dimidrol.common.DEFAULT_LONG
+
 data class DeviceMonitorConfig(
     val samplePeriodMs: Long = DEFAULT_SAMPLE_PERIOD_MS,
     val memoryThresholdMb: Long = DEFAULT_MEMORY_THRESHOLD_MB,
@@ -181,25 +185,25 @@ data class DeviceMonitorConfig(
         }
 
         fun build(): DeviceMonitorConfig {
-            val boundedHighDrain = batteryDrainHighThresholdPercentPerHour.coerceAtLeast(0f)
+            val boundedHighDrain = batteryDrainHighThresholdPercentPerHour.coerceAtLeast(DEFAULT_FLOAT)
             return DeviceMonitorConfig(
                 samplePeriodMs = samplePeriodMs.coerceAtLeast(1L),
-                memoryThresholdMb = memoryThresholdMb.coerceAtLeast(0L),
-                storageThresholdMb = storageThresholdMb.coerceAtLeast(0L),
-                cpuOverloadThresholdPercent = cpuOverloadThresholdPercent.coerceIn(0f, 100f),
-                batteryLowThresholdPercent = batteryLowThresholdPercent.coerceIn(0, 100),
+                memoryThresholdMb = memoryThresholdMb.coerceAtLeast(DEFAULT_LONG),
+                storageThresholdMb = storageThresholdMb.coerceAtLeast(DEFAULT_LONG),
+                cpuOverloadThresholdPercent = cpuOverloadThresholdPercent.coerceIn(DEFAULT_FLOAT, 100f),
+                batteryLowThresholdPercent = batteryLowThresholdPercent.coerceIn(DEFAULT_INT, 100),
                 batteryTemperatureThresholdC = batteryTemperatureThresholdC,
                 enableRecommendations = enableRecommendations,
                 enableThermalHeadroom = enableThermalHeadroom,
                 enableBatteryDrain = enableBatteryDrain,
-                recommendationCooldownMs = recommendationCooldownMs.coerceAtLeast(0L),
-                thermalHeadroomForecastSeconds = thermalHeadroomForecastSeconds.coerceAtLeast(0),
-                thermalHeadroomLowThreshold = thermalHeadroomLowThreshold.coerceAtLeast(0f),
+                recommendationCooldownMs = recommendationCooldownMs.coerceAtLeast(DEFAULT_LONG),
+                thermalHeadroomForecastSeconds = thermalHeadroomForecastSeconds.coerceAtLeast(DEFAULT_INT),
+                thermalHeadroomLowThreshold = thermalHeadroomLowThreshold.coerceAtLeast(DEFAULT_FLOAT),
                 batteryDrainHighThresholdPercentPerHour = boundedHighDrain,
                 batteryDrainCriticalThresholdPercentPerHour = batteryDrainCriticalThresholdPercentPerHour
                     .coerceAtLeast(boundedHighDrain),
                 enableMetricSmoothing = enableMetricSmoothing,
-                riskScoreEmaAlpha = riskScoreEmaAlpha.coerceIn(0f, 1f),
+                riskScoreEmaAlpha = riskScoreEmaAlpha.coerceIn(DEFAULT_FLOAT, 1f),
                 healthSmoothingWindowSize = healthSmoothingWindowSize.coerceAtLeast(1),
                 recommendationPolicy = recommendationPolicy,
                 enableThermal = enableThermal,

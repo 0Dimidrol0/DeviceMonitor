@@ -1,5 +1,7 @@
 package io.github.dimidrol.impl
 
+import io.github.dimidrol.common.DEFAULT_LONG
+
 internal class RecommendationEventThrottle(
     private var cooldownMs: Long
 ) {
@@ -8,7 +10,7 @@ internal class RecommendationEventThrottle(
     private val lastEmittedAtByKey = mutableMapOf<String, Long>()
 
     fun updateCooldown(cooldownMs: Long) {
-        this.cooldownMs = cooldownMs.coerceAtLeast(0L)
+        this.cooldownMs = cooldownMs.coerceAtLeast(DEFAULT_LONG)
     }
 
     fun reset() {

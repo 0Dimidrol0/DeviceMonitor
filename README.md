@@ -95,6 +95,27 @@ DeviceMonitor.init(
 
 ---
 
+## First Value In 15 Minutes
+
+1. Enable recommendations in `DeviceMonitorConfig`.
+2. Subscribe to `monitor.recommendations`.
+3. Apply `ReduceWorkload` to bitrate/FPS/concurrency.
+4. Track `WorkloadReport` before and after adaptation.
+
+Use this measurement template for your own workload:
+
+| Metric | Before Guard | After Guard |
+|---|---:|---:|
+| Avg session FPS |  |  |
+| Jank % |  |  |
+| Thermal critical events / 10 min |  |  |
+| Battery drain %/hour |  |  |
+| Session aborts (thermal/battery) |  |  |
+
+Populate this table with your device matrix (`mid`, `high`, `flagship`) to quickly validate impact.
+
+---
+
 ## Adaptive Workload Guard (0.4.0)
 
 Recommendations are emitted from `monitor.recommendations` and can be applied directly to bitrate/FPS/concurrency controls.
@@ -128,6 +149,31 @@ Built-in behavior:
 Recommendation duplicates are throttled using `recommendationCooldownMs`.
 
 For advanced behavior you can plug in your own recommendation strategy with `DeviceMonitorConfig.recommendationPolicy`.
+
+---
+
+## Symptom To Action Map
+
+| Symptom in Telemetry | Recommendation | Typical Action |
+|---|---|---|
+| `health() == WARM` | `ReduceWorkload(scale=0.8)` | Lower encoder bitrate by 15-25% |
+| `health() == DEGRADED` | `ReduceWorkload(scale=0.55)` | Cut FPS and parallel jobs |
+| `health() == CRITICAL` | `PauseWorkload` | Pause heavy stage / switch to safe mode |
+| Recovered to `NORMAL` | `ResumeWorkload` | Restore defaults gradually |
+| `BatteryDrainHigh` + high projected drain | `DelayHeavyTask` | Retry export/sync later |
+| `ThermalHeadroomLow` | `ReduceWorkload` | Lower camera quality tier / downscale render |
+
+---
+
+## Integration Examples
+
+Ready-to-copy integration patterns:
+
+- ExoPlayer bitrate adaptation
+- CameraX FPS/quality adaptation
+- WebRTC sender and capture adaptation
+
+See: [Adaptive Workload Guard Playbook](docs/adaptive-workload-guard-playbook.md)
 
 ---
 
@@ -215,6 +261,7 @@ Coverage includes:
 - per-device recommendation tuning profiles
 - recommendation policy plug-ins
 - richer workload session analytics
+- turn-key integration modules for common media stacks
 
 ---
 

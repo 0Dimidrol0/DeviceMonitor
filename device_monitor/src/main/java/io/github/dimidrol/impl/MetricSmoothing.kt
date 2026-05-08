@@ -1,15 +1,17 @@
 package io.github.dimidrol.impl
 
+import io.github.dimidrol.common.DEFAULT_FLOAT
+import io.github.dimidrol.common.DEFAULT_INT
 import io.github.dimidrol.models.DeviceHealth
 
 internal class ExponentialMovingAverage(
     alpha: Float
 ) {
-    private var alpha: Float = alpha.coerceIn(0f, 1f)
+    private var alpha: Float = alpha.coerceIn(DEFAULT_FLOAT, 1f)
     private var lastValue: Float? = null
 
     fun updateAlpha(alpha: Float) {
-        this.alpha = alpha.coerceIn(0f, 1f)
+        this.alpha = alpha.coerceIn(DEFAULT_FLOAT, 1f)
     }
 
     fun reset() {
@@ -28,11 +30,11 @@ internal class ExponentialMovingAverage(
 internal class RollingHealthSmoother(
     windowSize: Int
 ) {
-    private var windowSize = windowSize.coerceAtLeast(1)
+    private var windowSize = windowSize.coerceAtLeast(DEFAULT_INT + 1)
     private val values = ArrayDeque<DeviceHealth>()
 
     fun updateWindowSize(windowSize: Int) {
-        this.windowSize = windowSize.coerceAtLeast(1)
+        this.windowSize = windowSize.coerceAtLeast(DEFAULT_INT + 1)
         while (values.size > this.windowSize) {
             values.removeFirst()
         }

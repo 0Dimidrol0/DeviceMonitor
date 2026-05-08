@@ -1,6 +1,10 @@
 package io.github.dimidrol.models
 
 import io.github.dimidrol.BYTES_IN_MB
+import io.github.dimidrol.common.DEFAULT_FLOAT
+import io.github.dimidrol.common.DEFAULT_INT
+import io.github.dimidrol.common.DEFAULT_LONG
+import io.github.dimidrol.common.orDefault
 
 data class DeviceSnapshot(
     val tsMs: Long,
@@ -32,17 +36,19 @@ data class DeviceSnapshot(
     fun averageCpuUsage(): Float? = cpuUsagePerCore?.takeIf { it.isNotEmpty() }?.average()?.toFloat()
 
     fun storageUsedBytes(): Long? {
-        return storageTotalBytes?.let { total -> total - (storageFreeBytes ?: 0L) }?.coerceAtLeast(0L)
+        return storageTotalBytes
+            ?.let { total -> total - storageFreeBytes.orDefault() }
+            ?.coerceAtLeast(DEFAULT_LONG)
     }
 
     fun storageUsedPercent(): Float? {
         val total = storageTotalBytes ?: return null
         val used = storageUsedBytes() ?: return null
-        return if (total <= 0) null else (used.toFloat() / total * 100f)
+        return if (total <= DEFAULT_LONG) null else (used.toFloat() / total * 100f)
     }
 
     fun riskScore(): Int {
-        var score = 0
+        var score = DEFAULT_INT
 
         if (thermalStatus.hasThermalRisk()) score += 25
         if (batteryTempC != null && batteryTempC >= 45f) score += 12
@@ -53,8 +59,8 @@ data class DeviceSnapshot(
         val avgCpu = cpuUsagePercent ?: averageCpuUsage()
         if (avgCpu != null && avgCpu > 78f) score += 16
 
-        val GPUjank = frameMetrics?.jankPercent ?: 0f
-        if (GPUjank > 5f) score += 8
+        val gpuJank = frameMetrics?.jankPercent.orDefault()
+        if (gpuJank > 5f) score += 8
 
         return score.coerceAtMost(100)
     }
