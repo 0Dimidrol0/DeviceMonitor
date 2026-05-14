@@ -12,6 +12,13 @@ Lightweight Android telemetry library for high-load sessions such as media proce
 
 ---
 
+## Showcase
+
+![DeviceMonitor showcase main dashboard](docs/images/Screenshot_1.png)
+![DeviceMonitor showcase live metrics](docs/images/Screenshot_2.png)
+
+---
+
 ## Features
 
 DeviceMonitor tracks:
@@ -42,7 +49,7 @@ SharedFlow<DeviceRecommendation>
 
 ```kotlin
 dependencies {
-    implementation("io.github.0dimidrol0:DeviceMonitor:0.4.0")
+    implementation("io.github.0dimidrol0:DeviceMonitor:0.5.0")
 }
 ```
 
@@ -50,7 +57,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'io.github.0dimidrol0:DeviceMonitor:0.4.0'
+    implementation 'io.github.0dimidrol0:DeviceMonitor:0.5.0'
 }
 ```
 
@@ -83,14 +90,49 @@ DeviceMonitor.init(
         .enableThermalHeadroom(true)
         .enableBatteryDrain(true)
         .thermalHeadroomForecastSeconds(10)
+        .thermalHeadroomLowThreshold(0.2f)
         .batteryDrainHighThresholdPercentPerHour(20f)
+        .batteryDrainCriticalThresholdPercentPerHour(35f)
+        .enableMetricSmoothing(true)
+        .riskScoreEmaAlpha(0.35f)
+        .healthSmoothingWindowSize(3)
         .build()
+)
+```
+
+Use marketplace profile preset:
+
+```kotlin
+DeviceMonitor.init(
+    appContext,
+    DeviceMonitorProfiles.config(AppProfile.REALTIME_GAMING)
 )
 ```
 
 ---
 
-## Adaptive Workload Guard (0.4.0)
+## First Value In 15 Minutes
+
+1. Enable recommendations in `DeviceMonitorConfig`.
+2. Subscribe to `monitor.recommendations`.
+3. Apply `ReduceWorkload` to bitrate/FPS/concurrency.
+4. Track `WorkloadReport` before and after adaptation.
+
+Use this measurement template for your own workload:
+
+| Metric | Before Guard | After Guard |
+|---|---:|---:|
+| Avg session FPS |  |  |
+| Jank % |  |  |
+| Thermal critical events / 10 min |  |  |
+| Battery drain %/hour |  |  |
+| Session aborts (thermal/battery) |  |  |
+
+Populate this table with your device matrix (`mid`, `high`, `flagship`) to quickly validate impact.
+
+---
+
+## Adaptive Workload Guard (0.5.0)
 
 Recommendations are emitted from `monitor.recommendations` and can be applied directly to bitrate/FPS/concurrency controls.
 
@@ -121,6 +163,60 @@ Built-in behavior:
 - return from `DEGRADED`/`CRITICAL` to `NORMAL` -> `ResumeWorkload(...)`
 
 Recommendation duplicates are throttled using `recommendationCooldownMs`.
+
+For advanced behavior you can plug in your own recommendation strategy with `DeviceMonitorConfig.recommendationPolicy`.
+
+---
+
+## Symptom To Action Map
+
+| Symptom in Telemetry | Recommendation | Typical Action |
+|---|---|---|
+| `health() == WARM` | `ReduceWorkload(scale=0.8)` | Lower encoder bitrate by 15-25% |
+| `health() == DEGRADED` | `ReduceWorkload(scale=0.55)` | Cut FPS and parallel jobs |
+| `health() == CRITICAL` | `PauseWorkload` | Pause heavy stage / switch to safe mode |
+| Recovered to `NORMAL` | `ResumeWorkload` | Restore defaults gradually |
+| `BatteryDrainHigh` + high projected drain | `DelayHeavyTask` | Retry export/sync later |
+| `ThermalHeadroomLow` | `ReduceWorkload` | Lower camera quality tier / downscale render |
+
+---
+
+## Integration Examples
+
+Ready-to-copy integration patterns:
+
+- ExoPlayer bitrate adaptation
+- CameraX FPS/quality adaptation
+- WebRTC sender and capture adaptation
+
+See: [Adaptive Workload Guard Playbook](docs/adaptive-workload-guard-playbook.md)
+
+---
+
+## Marketplace Profiles (10 Presets)
+
+`DeviceMonitorProfiles` includes ready-to-use configs for common app categories:
+
+- `SOCIAL_SHORT_VIDEO`
+- `VIDEO_STREAMING_ON_DEMAND`
+- `LIVE_STREAMING_CREATOR`
+- `VIDEO_CALL_MESSAGING`
+- `REALTIME_GAMING`
+- `PHOTO_VIDEO_EDITING`
+- `MUSIC_AUDIO_STREAMING`
+- `SHOPPING_ECOMMERCE`
+- `MAPS_NAVIGATION_DELIVERY`
+- `PRODUCTIVITY_COLLABORATION`
+
+Use one as baseline, then override with builder if needed:
+
+```kotlin
+val base = DeviceMonitorProfiles.config(AppProfile.VIDEO_CALL_MESSAGING)
+val custom = base.toBuilder()
+    .samplePeriodMs(1_800L)
+    .batteryTemperatureThresholdC(42f)
+    .build()
+```
 
 ---
 
@@ -176,6 +272,10 @@ val report = session.stop()
 - `startSnapshot`
 - `endSnapshot`
 - `maxRiskScore`
+- `avgRiskScore`
+- `timeInStatesMs`
+- `peakBatteryTempC`
+- `minThermalHeadroom`
 - `warningCount`
 - `recommendations`
 
@@ -204,23 +304,23 @@ Coverage includes:
 - per-device recommendation tuning profiles
 - recommendation policy plug-ins
 - richer workload session analytics
+- turn-key integration modules for common media stacks
 
 ---
 
 ## Changelog
 
-### 0.4.0
+### 0.5.0
 
 - Added Adaptive Workload Guard with `DeviceRecommendation` flow.
 - Added `ThermalHeadroomSnapshot` and `BatteryDrainSnapshot`.
 - Added warning events `ThermalHeadroomLow` and `BatteryDrainHigh`.
 - Added workload APIs: `createWorkloadSession`, `WorkloadSession`, `WorkloadReport`, `WorkloadType`.
 - Extended `DeviceMonitorConfig` with recommendation/headroom/drain controls.
-
-### 0.3.0
-
-- Added extended telemetry (`thermalZones`, `networkTraffic`, `batteryPower`, frame metrics support).
-- Added `riskScore()` / `health()` helpers and warning transition throttling.
+- Added pluggable `RecommendationPolicy`.
+- Added optional metric smoothing (EMA + rolling window) for recommendation health evaluation.
+- Added richer workload report analytics (`avgRiskScore`, health-state time, thermal/battery peaks).
+- Split sensor reads into internal provider abstractions for cleaner extension points.
 
 ---
 

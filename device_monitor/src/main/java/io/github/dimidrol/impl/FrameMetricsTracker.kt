@@ -5,6 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import android.view.FrameMetrics
 import android.view.Window
+import io.github.dimidrol.common.DEFAULT_FLOAT
+import io.github.dimidrol.common.DEFAULT_INT
+import io.github.dimidrol.common.DEFAULT_LONG
 import io.github.dimidrol.models.FrameMetricsSnapshot
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -21,7 +24,7 @@ internal class FrameMetricsTracker(
 
     private val listener = Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
         val totalNs = metrics.getMetric(FrameMetrics.TOTAL_DURATION)
-        if (totalNs < 0) return@OnFrameMetricsAvailableListener
+        if (totalNs < DEFAULT_LONG) return@OnFrameMetricsAvailableListener
 
         val durationMs = totalNs / 1_000_000f
         val frames = frameCounter.incrementAndGet()
@@ -29,15 +32,15 @@ internal class FrameMetricsTracker(
         val isJank = isJankyFrame(metrics, totalNs)
         val janks = if (isJank) jankCounter.incrementAndGet() else jankCounter.get()
 
-        val jankPercent = if (frames == 0) {
-            0f
+        val jankPercent = if (frames == DEFAULT_INT) {
+            DEFAULT_FLOAT
         } else {
             (janks.toFloat() / frames.toFloat()) * 100f
         }
 
         latest = FrameMetricsSnapshot(
             frameDurationMs = durationMs,
-            jankPercent = jankPercent.coerceIn(0f, 100f),
+            jankPercent = jankPercent.coerceIn(DEFAULT_FLOAT, 100f),
             sampleCount = frames
         )
     }

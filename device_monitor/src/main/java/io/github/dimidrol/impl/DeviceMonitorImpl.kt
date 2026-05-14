@@ -24,9 +24,13 @@ import androidx.core.content.ContextCompat
 import io.github.dimidrol.BYTES_IN_MB
 import io.github.dimidrol.DeviceMonitor
 import io.github.dimidrol.DeviceMonitorConfig
+import io.github.dimidrol.RecommendationContext
 import io.github.dimidrol.WorkloadReport
 import io.github.dimidrol.WorkloadSession
 import io.github.dimidrol.WorkloadType
+import io.github.dimidrol.common.DEFAULT_BOOLEAN
+import io.github.dimidrol.common.DEFAULT_DOUBLE
+import io.github.dimidrol.common.DEFAULT_FLOAT
 import io.github.dimidrol.common.DEFAULT_INT
 import io.github.dimidrol.common.DEFAULT_LONG
 import io.github.dimidrol.common.orDefault
@@ -40,8 +44,6 @@ import io.github.dimidrol.models.DeviceWarningEvent
 import io.github.dimidrol.models.NetworkTrafficSnapshot
 import io.github.dimidrol.models.NetworkType
 import io.github.dimidrol.models.PowerSource
-import io.github.dimidrol.models.RecommendationReason
-import io.github.dimidrol.models.RecommendationSeverity
 import io.github.dimidrol.models.ThermalHeadroomSnapshot
 import io.github.dimidrol.models.ThermalLevel
 import io.github.dimidrol.models.ThermalZoneReading
@@ -75,7 +77,6 @@ private const val PROCESS_STAT_STIME_INDEX = 14
 private const val PROCESS_STAT_CUTIME_INDEX = 15
 private const val PROCESS_STAT_CSTIME_INDEX = 16
 private const val PROCESS_STAT_SPLIT_LIMIT = PROCESS_STAT_CSTIME_INDEX + 2
-private const val THERMAL_HEADROOM_LOW_THRESHOLD = 0.2f
 private const val POWER_WATTS_DIVIDER = 1_000_000_000f
 private const val MILLIS_IN_HOUR = 3_600_000L
 private const val MAX_THERMAL_HEADROOM_FORECAST_SECONDS = 60
@@ -149,8 +150,8 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private val cpuTicksPerSecond = runCatching {
         Os.sysconf(OsConstants._SC_CLK_TCK)
     }.getOrDefault(CPU_JIFFY_FALLBACK).coerceAtLeast(1L)
-    private var lastProcessCpuTimeSec = 0.0
-    private var lastProcessElapsedSec = 0.0
+    private var lastProcessCpuTimeSec = DEFAULT_DOUBLE
+    private var lastProcessElapsedSec = DEFAULT_DOUBLE
 
     private var lastTxBytes: Long? = null
     private var lastRxBytes: Long? = null
@@ -159,6 +160,28 @@ internal object DeviceMonitorImpl : DeviceMonitor {
 
     private var previousRecommendationHealth: DeviceHealth? = null
     private var lastDrainSample: DrainSample? = null
+    private var recommendationPolicy = currentConfig.recommendationPolicy
+
+    private val riskScoreEma = ExponentialMovingAverage(currentConfig.riskScoreEmaAlpha)
+    private val healthSmoother = RollingHealthSmoother(currentConfig.healthSmoothingWindowSize)
+
+    private var cpuSensorProvider: CpuSensorProvider = DelegatingCpuSensorProvider(
+        cpuUsageReader = ::readCpuUsage,
+        cpuUsagePerCoreReader = ::readCpuUsagePerCore,
+        cpuFrequenciesReader = ::readCpuFreqKHzPerCore
+    )
+    private var thermalSensorProvider: ThermalSensorProvider = DelegatingThermalSensorProvider(
+        thermalLevelReader = ::readThermalLevel,
+        thermalZonesReader = ::readThermalZones,
+        thermalHeadroomReader = ::readThermalHeadroom
+    )
+    private var batterySensorProvider: BatterySensorProvider = DelegatingBatterySensorProvider(
+        batterySnapshotReader = ::collectBatterySensorSnapshot
+    )
+    private var networkSensorProvider: NetworkSensorProvider = DelegatingNetworkSensorProvider(
+        networkTypeReader = ::readNetworkType,
+        networkTrafficReader = ::readNetworkTraffic
+    )
 
     private val warningEventThrottle = WarningEventThrottle()
     private val recommendationEventThrottle = RecommendationEventThrottle(currentConfig.recommendationCooldownMs)
@@ -184,6 +207,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         cpuOverloadThresholdPercent = config.cpuOverloadThresholdPercent
         batteryLowThresholdPercent = config.batteryLowThresholdPercent
         batteryTempThresholdC = config.batteryTemperatureThresholdC
+        recommendationPolicy = config.recommendationPolicy
+        riskScoreEma.updateAlpha(config.riskScoreEmaAlpha)
+        healthSmoother.updateWindowSize(config.healthSmoothingWindowSize)
         recommendationEventThrottle.updateCooldown(config.recommendationCooldownMs)
     }
 
@@ -211,6 +237,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         warningEventThrottle.reset()
         recommendationEventThrottle.reset()
         previousRecommendationHealth = null
+        riskScoreEma.reset()
+        healthSmoother.reset()
+        lastDrainSample = null
 
         pollJob = scope.launch {
             while (isActive) {
@@ -249,6 +278,9 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         warningEventThrottle.reset()
         recommendationEventThrottle.reset()
         previousRecommendationHealth = null
+        riskScoreEma.reset()
+        healthSmoother.reset()
+        lastDrainSample = null
         detachThermalListener()
         detachBatteryReceiver()
     }
@@ -351,40 +383,54 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     private fun collectSnapshot(): DeviceSnapshot {
         val timestamp = System.currentTimeMillis()
         val thermal = if (currentConfig.enableThermal) {
-            readThermalLevel()
+            thermalSensorProvider.readThermalLevel()
         } else {
             ThermalLevel.UNKNOWN
         }
-        val thermalHeadroom = readThermalHeadroom(thermal)
+        val thermalHeadroom = if (currentConfig.enableThermal) {
+            thermalSensorProvider.readThermalHeadroom(thermal)
+        } else {
+            null
+        }
         val (availMem, thresholdMem, lowMem) = readMemInfo()
         val (freeStorage, totalStorage) = readStorageInfo()
-        val cpuFreqs = readCpuFreqKHzPerCore()
-        val cpuUsage = readCpuUsage()
-        val cpuUsagePerCore = readCpuUsagePerCore()
+        val cpuFreqs = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuFrequenciesKHz()
+        } else {
+            null
+        }
+        val cpuUsage = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuUsagePercent()
+        } else {
+            null
+        }
+        val cpuUsagePerCore = if (currentConfig.enableCpu) {
+            cpuSensorProvider.readCpuUsagePerCore()
+        } else {
+            null
+        }
         val network = if (currentConfig.enableNetwork) {
-            readNetworkType()
+            networkSensorProvider.readNetworkType()
         } else {
             NetworkType.UNKNOWN
         }
         val uptime = readUptimeMs()
         val thermalZones = if (currentConfig.enableThermal) {
-            readThermalZones() ?: emptyList()
+            thermalSensorProvider.readThermalZones() ?: emptyList()
         } else {
             emptyList()
         }
         val frameMetrics = frameMetricsTracker?.snapshot()
         val networkTraffic = if (currentConfig.enableNetwork) {
-            readNetworkTraffic()
+            networkSensorProvider.readNetworkTraffic()
         } else {
             null
         }
-        val batteryReadings = if (currentConfig.enableBattery) {
-            readBatteryReadings()
+        val batterySnapshot = if (currentConfig.enableBattery) {
+            batterySensorProvider.readBatterySnapshot()
         } else {
-            null
+            BatterySensorSnapshot(power = null, drain = null)
         }
-        val batteryPower = batteryReadings?.toBatteryPowerSnapshot()
-        val batteryDrain = readBatteryDrainSnapshot(batteryReadings)
 
         return DeviceSnapshot(
             tsMs = timestamp,
@@ -404,13 +450,13 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             thermalZones = thermalZones,
             frameMetrics = frameMetrics,
             networkTraffic = networkTraffic,
-            batteryPower = batteryPower,
+            batteryPower = batterySnapshot.power,
             batteryVoltageMv = lastBatteryVoltageMv,
             batteryHealth = lastBatteryHealth,
             batteryPlugType = lastBatteryPlugType,
             uptimeMs = uptime,
             thermalHeadroom = thermalHeadroom,
-            batteryDrain = batteryDrain
+            batteryDrain = batterySnapshot.drain
         )
     }
 
@@ -424,7 +470,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 )
             )
         } else {
-            warningEventThrottle.shouldEmitMemoryLow(isRiskActive = false)
+            warningEventThrottle.shouldEmitMemoryLow(isRiskActive = DEFAULT_BOOLEAN)
         }
 
         val storageRisk = currentConfig.enableStorage &&
@@ -439,7 +485,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 )
             )
         } else {
-            warningEventThrottle.shouldEmitStorageLow(isRiskActive = false)
+            warningEventThrottle.shouldEmitStorageLow(isRiskActive = DEFAULT_BOOLEAN)
         }
 
         if (currentConfig.enableBattery) {
@@ -456,7 +502,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     )
                 )
             } else {
-                warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
+                warningEventThrottle.shouldEmitBatteryLow(isRiskActive = DEFAULT_BOOLEAN)
             }
 
             val batteryTemp = snapshot.batteryTempC
@@ -469,7 +515,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     )
                 )
             } else {
-                warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
+                warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = DEFAULT_BOOLEAN)
             }
 
             val drainPercentPerHour = snapshot.batteryDrain?.drainPercentPerHour
@@ -485,12 +531,12 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     )
                 )
             } else {
-                warningEventThrottle.shouldEmitBatteryDrainHigh(isRiskActive = false)
+                warningEventThrottle.shouldEmitBatteryDrainHigh(isRiskActive = DEFAULT_BOOLEAN)
             }
         } else {
-            warningEventThrottle.shouldEmitBatteryLow(isRiskActive = false)
-            warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = false)
-            warningEventThrottle.shouldEmitBatteryDrainHigh(isRiskActive = false)
+            warningEventThrottle.shouldEmitBatteryLow(isRiskActive = DEFAULT_BOOLEAN)
+            warningEventThrottle.shouldEmitBatteryTempHigh(isRiskActive = DEFAULT_BOOLEAN)
+            warningEventThrottle.shouldEmitBatteryDrainHigh(isRiskActive = DEFAULT_BOOLEAN)
         }
 
         if (currentConfig.enableCpu) {
@@ -505,33 +551,34 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     )
                 )
             } else {
-                warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
+                warningEventThrottle.shouldEmitCpuOverload(isRiskActive = DEFAULT_BOOLEAN)
             }
         } else {
-            warningEventThrottle.shouldEmitCpuOverload(isRiskActive = false)
+            warningEventThrottle.shouldEmitCpuOverload(isRiskActive = DEFAULT_BOOLEAN)
         }
 
         val thermalHeadroom = snapshot.thermalHeadroom
+        val thermalHeadroomThreshold = currentConfig.thermalHeadroomLowThreshold
         val thermalHeadroomRisk = currentConfig.enableThermalHeadroom &&
             thermalHeadroom != null &&
             listOfNotNull(thermalHeadroom.currentHeadroom, thermalHeadroom.forecastHeadroom)
-                .any { it <= THERMAL_HEADROOM_LOW_THRESHOLD }
+                .any { it <= thermalHeadroomThreshold }
         if (warningEventThrottle.shouldEmitThermalHeadroomLow(isRiskActive = thermalHeadroomRisk)) {
             emitWarningEvent(
                 DeviceWarningEvent.ThermalHeadroomLow(
                     currentHeadroom = thermalHeadroom?.currentHeadroom,
                     forecastHeadroom = thermalHeadroom?.forecastHeadroom,
-                    threshold = THERMAL_HEADROOM_LOW_THRESHOLD,
+                    threshold = thermalHeadroomThreshold,
                     status = thermalHeadroom?.status ?: snapshot.thermalStatus
                 )
             )
         } else {
-            warningEventThrottle.shouldEmitThermalHeadroomLow(isRiskActive = false)
+            warningEventThrottle.shouldEmitThermalHeadroomLow(isRiskActive = DEFAULT_BOOLEAN)
         }
     }
 
     private fun emitRecommendation(snapshot: DeviceSnapshot) {
-        val currentHealth = snapshot.health()
+        val currentHealth = evaluateRecommendationHealth(snapshot)
 
         if (!currentConfig.enableRecommendations) {
             previousRecommendationHealth = currentHealth
@@ -539,9 +586,15 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             return
         }
 
-        val recommendation = recommendationForHealth(
-            currentHealth = currentHealth,
-            previousHealth = previousRecommendationHealth
+        val recommendation = recommendationPolicy.recommend(
+            RecommendationContext(
+                snapshot = snapshot,
+                currentHealth = currentHealth,
+                previousHealth = previousRecommendationHealth,
+                thermalHeadroomLowThreshold = currentConfig.thermalHeadroomLowThreshold,
+                batteryDrainCriticalThresholdPercentPerHour = currentConfig.batteryDrainCriticalThresholdPercentPerHour,
+                recommendationCooldownMs = currentConfig.recommendationCooldownMs
+            )
         )
 
         val key = recommendation?.throttleKey()
@@ -555,9 +608,31 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         previousRecommendationHealth = currentHealth
     }
 
+    private fun evaluateRecommendationHealth(snapshot: DeviceSnapshot): DeviceHealth {
+        if (!currentConfig.enableMetricSmoothing) {
+            return snapshot.health()
+        }
+
+        val rawScore = snapshot.riskScore().toFloat()
+        val smoothedScore = riskScoreEma.update(rawScore)
+        val emaHealth = healthFromRiskScore(smoothedScore)
+        return healthSmoother.add(emaHealth)
+    }
+
     private fun emitWarningEvent(event: DeviceWarningEvent) {
         _warningEvents.tryEmit(event)
         recordWarningForSessions()
+    }
+
+    private fun collectBatterySensorSnapshot(): BatterySensorSnapshot {
+        if (!currentConfig.enableBattery) {
+            return BatterySensorSnapshot(power = null, drain = null)
+        }
+
+        val readings = readBatteryReadings()
+        val power = readings?.toBatteryPowerSnapshot()
+        val drain = readBatteryDrainSnapshot(readings)
+        return BatterySensorSnapshot(power = power, drain = drain)
     }
 
     private fun readThermalLevel(): ThermalLevel {
@@ -667,7 +742,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             if (values.size < 5) return null
 
             val total = values.sum()
-            val idle = values[3] + values.getOrElse(4) { 0L }
+            val idle = values[3] + values.getOrElse(4) { DEFAULT_LONG }
 
             if (lastCpuTotal == DEFAULT_LONG) {
                 lastCpuTotal = total
@@ -703,7 +778,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             val currentCpuTimeSec = processCpuTicks / cpuTicksPerSecond
             val currentElapsedSec = SystemClock.elapsedRealtime() / 1000.0
 
-            if (lastProcessCpuTimeSec <= 0.0 || lastProcessElapsedSec <= 0.0) {
+            if (lastProcessCpuTimeSec <= DEFAULT_DOUBLE || lastProcessElapsedSec <= DEFAULT_DOUBLE) {
                 lastProcessCpuTimeSec = currentCpuTimeSec
                 lastProcessElapsedSec = currentElapsedSec
                 return null
@@ -715,10 +790,10 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             lastProcessCpuTimeSec = currentCpuTimeSec
             lastProcessElapsedSec = currentElapsedSec
 
-            if (cpuDeltaSec <= 0.0 || elapsedDeltaSec <= 0.0) return null
+            if (cpuDeltaSec <= DEFAULT_DOUBLE || elapsedDeltaSec <= DEFAULT_DOUBLE) return null
 
             val usageRatio = (cpuDeltaSec / elapsedDeltaSec) / cpuCoreCount
-            (usageRatio * 100.0).coerceIn(0.0, 100.0).toFloat()
+            (usageRatio * 100.0).coerceIn(DEFAULT_DOUBLE, 100.0).toFloat()
         } catch (_: Throwable) {
             null
         }
@@ -740,7 +815,7 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 if (values.size < 5) return@forEach
 
                 val total = values.sum()
-                val idle = values[3] + values.getOrElse(4) { 0L }
+                val idle = values[3] + values.getOrElse(4) { DEFAULT_LONG }
                 val previous = lastCpuPerCoreTimes[label]
                 lastCpuPerCoreTimes[label] = CpuTimes(total, idle)
 
@@ -1000,22 +1075,27 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         chargeCounterUaH: Long?,
         currentMicroAmps: Long?
     ): Long? {
-        if (drainPercentPerHour != null && drainPercentPerHour > 0f && currentBatteryPercent != null && currentBatteryPercent > 0) {
+        if (
+            drainPercentPerHour != null &&
+            drainPercentPerHour > DEFAULT_FLOAT &&
+            currentBatteryPercent != null &&
+            currentBatteryPercent > DEFAULT_INT
+        ) {
             return ((currentBatteryPercent / drainPercentPerHour) * MILLIS_IN_HOUR)
                 .toLong()
-                .coerceAtLeast(0L)
+                .coerceAtLeast(DEFAULT_LONG)
         }
 
         val current = currentMicroAmps ?: return null
         val chargeCounter = chargeCounterUaH ?: return null
-        if (current >= 0) return null
+        if (current >= DEFAULT_LONG) return null
 
         val drainMicroAmps = abs(current.toDouble())
-        if (drainMicroAmps <= 0.0) return null
+        if (drainMicroAmps <= DEFAULT_DOUBLE) return null
 
         return ((chargeCounter / drainMicroAmps) * MILLIS_IN_HOUR)
             .toLong()
-            .coerceAtLeast(0L)
+            .coerceAtLeast(DEFAULT_LONG)
     }
 
     private fun safeLongProperty(value: Long): Long? = value.takeIf { it != Long.MIN_VALUE }
@@ -1074,11 +1154,18 @@ internal object DeviceMonitorImpl : DeviceMonitor {
     ) : WorkloadSession {
 
         private val lock = Any()
-        private var running = false
-        private var startedAtMs = 0L
+        private var running = DEFAULT_BOOLEAN
+        private var startedAtMs = DEFAULT_LONG
         private var startSnapshot: DeviceSnapshot? = null
-        private var maxRiskScore = 0
-        private var warningCount = 0
+        private var maxRiskScore = DEFAULT_INT
+        private var riskScoreTotal = DEFAULT_LONG
+        private var riskSampleCount = DEFAULT_INT
+        private var warningCount = DEFAULT_INT
+        private var lastRecordedHealth: DeviceHealth? = null
+        private var lastRecordedAtMs = DEFAULT_LONG
+        private val timeInStatesMs = linkedMapOf<DeviceHealth, Long>()
+        private var peakBatteryTempC: Float? = null
+        private var minThermalHeadroom: Float? = null
         private val recommendations = mutableListOf<DeviceRecommendation>()
 
         override fun start() {
@@ -1090,9 +1177,17 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                 running = true
                 startedAtMs = startedAt
                 startSnapshot = initialSnapshot
-                maxRiskScore = initialSnapshot?.riskScore() ?: 0
-                warningCount = 0
+                maxRiskScore = initialSnapshot?.riskScore() ?: DEFAULT_INT
+                riskScoreTotal = initialSnapshot?.riskScore()?.toLong().orDefault()
+                riskSampleCount = if (initialSnapshot != null) 1 else 0
+                warningCount = DEFAULT_INT
+                peakBatteryTempC = initialSnapshot?.batteryTempC
+                minThermalHeadroom = initialSnapshot?.thermalHeadroom
+                    ?.let { listOfNotNull(it.currentHeadroom, it.forecastHeadroom).minOrNull() }
                 recommendations.clear()
+                timeInStatesMs.clear()
+                lastRecordedAtMs = initialSnapshot?.tsMs ?: startedAt
+                lastRecordedHealth = initialSnapshot?.health()
             }
 
             DeviceMonitorImpl.registerWorkloadSession(this)
@@ -1105,8 +1200,23 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             DeviceMonitorImpl.unregisterWorkloadSession(this)
 
             return synchronized(lock) {
-                val effectiveStart = startedAtMs.takeIf { it > 0L } ?: stoppedAtMs
-                val durationMs = (stoppedAtMs - effectiveStart).coerceAtLeast(0L)
+                val effectiveStart = startedAtMs.takeIf { it > DEFAULT_LONG } ?: stoppedAtMs
+                val durationMs = (stoppedAtMs - effectiveStart).coerceAtLeast(DEFAULT_LONG)
+                val averageRiskScore = if (riskSampleCount > 0) {
+                    riskScoreTotal.toFloat() / riskSampleCount.toFloat()
+                } else {
+                    DEFAULT_FLOAT
+                }
+
+                if (lastRecordedHealth != null) {
+                    val lastTs = lastRecordedAtMs.takeIf { it > DEFAULT_LONG } ?: effectiveStart
+                    val fallbackEndTs = finalSnapshot?.tsMs ?: stoppedAtMs
+                    val delta = (fallbackEndTs - lastTs).coerceAtLeast(DEFAULT_LONG)
+                    if (delta > DEFAULT_LONG) {
+                        val state = requireNotNull(lastRecordedHealth)
+                        timeInStatesMs[state] = timeInStatesMs[state].orDefault() + delta
+                    }
+                }
 
                 val report = WorkloadReport(
                     name = name,
@@ -1115,16 +1225,27 @@ internal object DeviceMonitorImpl : DeviceMonitor {
                     startSnapshot = startSnapshot,
                     endSnapshot = finalSnapshot,
                     maxRiskScore = maxRiskScore,
+                    avgRiskScore = averageRiskScore,
+                    timeInStatesMs = timeInStatesMs.toMap(),
+                    peakBatteryTempC = peakBatteryTempC,
+                    minThermalHeadroom = minThermalHeadroom,
                     warningCount = warningCount,
                     recommendations = recommendations.toList()
                 )
 
-                running = false
-                startedAtMs = 0L
+                running = DEFAULT_BOOLEAN
+                startedAtMs = DEFAULT_LONG
                 startSnapshot = null
-                maxRiskScore = 0
-                warningCount = 0
+                maxRiskScore = DEFAULT_INT
+                riskScoreTotal = DEFAULT_LONG
+                riskSampleCount = DEFAULT_INT
+                warningCount = DEFAULT_INT
+                lastRecordedAtMs = DEFAULT_LONG
+                lastRecordedHealth = null
+                peakBatteryTempC = null
+                minThermalHeadroom = null
                 recommendations.clear()
+                timeInStatesMs.clear()
 
                 report
             }
@@ -1133,7 +1254,32 @@ internal object DeviceMonitorImpl : DeviceMonitor {
         fun recordSnapshot(snapshot: DeviceSnapshot) {
             synchronized(lock) {
                 if (!running) return
-                maxRiskScore = maxOf(maxRiskScore, snapshot.riskScore())
+
+                val risk = snapshot.riskScore()
+                val health = snapshot.health()
+                maxRiskScore = maxOf(maxRiskScore, risk)
+                riskScoreTotal += risk.toLong()
+                riskSampleCount += 1
+
+                val previousHealth = lastRecordedHealth
+                if (previousHealth != null) {
+                    val delta = (snapshot.tsMs - lastRecordedAtMs).coerceAtLeast(DEFAULT_LONG)
+                    if (delta > DEFAULT_LONG) {
+                        timeInStatesMs[previousHealth] = timeInStatesMs[previousHealth].orDefault() + delta
+                    }
+                }
+                lastRecordedHealth = health
+                lastRecordedAtMs = snapshot.tsMs
+
+                snapshot.batteryTempC?.let { temp ->
+                    peakBatteryTempC = maxOf(peakBatteryTempC ?: temp, temp)
+                }
+                listOfNotNull(
+                    snapshot.thermalHeadroom?.currentHeadroom,
+                    snapshot.thermalHeadroom?.forecastHeadroom
+                ).minOrNull()?.let { candidate ->
+                    minThermalHeadroom = minOf(minThermalHeadroom ?: candidate, candidate)
+                }
             }
         }
 
@@ -1148,40 +1294,6 @@ internal object DeviceMonitorImpl : DeviceMonitor {
             synchronized(lock) {
                 if (!running) return
                 recommendations += recommendation
-            }
-        }
-    }
-}
-
-internal fun recommendationForHealth(
-    currentHealth: DeviceHealth,
-    previousHealth: DeviceHealth?
-): DeviceRecommendation? {
-    return when (currentHealth) {
-        DeviceHealth.WARM -> DeviceRecommendation.ReduceWorkload(
-            reason = RecommendationReason.HEALTH_WARM,
-            severity = RecommendationSeverity.MEDIUM,
-            suggestedScale = 0.8f
-        )
-
-        DeviceHealth.DEGRADED -> DeviceRecommendation.ReduceWorkload(
-            reason = RecommendationReason.HEALTH_DEGRADED,
-            severity = RecommendationSeverity.HIGH,
-            suggestedScale = 0.55f
-        )
-
-        DeviceHealth.CRITICAL -> DeviceRecommendation.PauseWorkload(
-            reason = RecommendationReason.HEALTH_CRITICAL,
-            severity = RecommendationSeverity.CRITICAL
-        )
-
-        DeviceHealth.NORMAL -> {
-            if (previousHealth == DeviceHealth.DEGRADED || previousHealth == DeviceHealth.CRITICAL) {
-                DeviceRecommendation.ResumeWorkload(
-                    reason = RecommendationReason.HEALTH_RECOVERED
-                )
-            } else {
-                null
             }
         }
     }
@@ -1208,7 +1320,7 @@ private fun DeviceRecommendation.throttleKey(): String {
 }
 
 internal fun safeThermalHeadroomValue(value: Float?): Float? {
-    return value?.takeIf { it.isFinite() && it >= 0f }
+    return value?.takeIf { it.isFinite() && it >= DEFAULT_FLOAT }
 }
 
 internal fun calculateBatteryDrainPercentPerHour(
@@ -1222,10 +1334,10 @@ internal fun calculateBatteryDrainPercentPerHour(
     val previousChargeCounter = previousChargeCounterUaH ?: return null
     val currentChargeCounter = currentChargeCounterUaH ?: return null
     val elapsedMs = currentTimestampMs - previousTimestampMs
-    if (elapsedMs <= 0L) return null
+    if (elapsedMs <= DEFAULT_LONG) return null
 
     val drainedUaH = previousChargeCounter - currentChargeCounter
-    if (drainedUaH <= 0L) return null
+    if (drainedUaH <= DEFAULT_LONG) return null
 
     val currentFullCapacityUaH = estimateBatteryFullCapacityUaH(
         chargeCounterUaH = currentChargeCounter,
@@ -1237,12 +1349,12 @@ internal fun calculateBatteryDrainPercentPerHour(
     )
 
     val fullCapacityUaH = currentFullCapacityUaH ?: previousFullCapacityUaH ?: return null
-    if (fullCapacityUaH <= 0f) return null
+    if (fullCapacityUaH <= DEFAULT_FLOAT) return null
 
     val drainRatePerHourUaH = drainedUaH.toFloat() * MILLIS_IN_HOUR / elapsedMs.toFloat()
-    if (drainRatePerHourUaH <= 0f) return null
+    if (drainRatePerHourUaH <= DEFAULT_FLOAT) return null
 
-    return (drainRatePerHourUaH / fullCapacityUaH * 100f).coerceAtLeast(0f)
+    return (drainRatePerHourUaH / fullCapacityUaH * 100f).coerceAtLeast(DEFAULT_FLOAT)
 }
 
 private fun estimateBatteryFullCapacityUaH(
@@ -1252,6 +1364,6 @@ private fun estimateBatteryFullCapacityUaH(
     val chargeCounter = chargeCounterUaH ?: return null
     val clampedCapacity = capacityPercent?.coerceIn(1, 100) ?: return null
     val ratio = clampedCapacity / 100f
-    if (ratio <= 0f) return null
+    if (ratio <= DEFAULT_FLOAT) return null
     return chargeCounter / ratio
 }

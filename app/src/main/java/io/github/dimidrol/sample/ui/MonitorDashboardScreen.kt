@@ -52,6 +52,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.dimidrol.common.DEFAULT_FLOAT
+import io.github.dimidrol.common.DEFAULT_INT
+import io.github.dimidrol.common.DEFAULT_LONG
+import io.github.dimidrol.common.orDefault
 import io.github.dimidrol.models.DeviceHealth
 import io.github.dimidrol.models.DeviceSnapshot
 import io.github.dimidrol.sample.MonitorUiState
@@ -72,7 +76,7 @@ fun MonitorDashboardScreen(
     onSnapshotClick: () -> Unit
 ) {
     val snapshot = uiState.lastSnapshot
-    val riskScore = snapshot?.riskScore() ?: 0
+    val riskScore = snapshot?.riskScore().orDefault()
     val animatedRisk = animateFloatAsState(
         targetValue = riskScore / 100f,
         animationSpec = spring(),
@@ -306,7 +310,7 @@ private fun MetricsGrid(snapshot: DeviceSnapshot?) {
                     title = "CPU",
                     value = "${formatPercent(snapshot.cpuUsagePercent)}%",
                     subtitle = "Avg per core ${formatPercent(snapshot.averageCpuUsage())}%",
-                    progress = (snapshot.cpuUsagePercent ?: 0f) / 100f
+                    progress = snapshot.cpuUsagePercent.orDefault() / 100f
                 )
                 MetricCard(
                     modifier = Modifier.weight(1f),
@@ -325,7 +329,7 @@ private fun MetricsGrid(snapshot: DeviceSnapshot?) {
                     title = "Storage",
                     value = snapshot.storageFreeBytes.toReadableBytes(),
                     subtitle = "Used ${formatPercent(snapshot.storageUsedPercent())}%",
-                    progress = (snapshot.storageUsedPercent() ?: 0f) / 100f
+                    progress = snapshot.storageUsedPercent().orDefault() / 100f
                 )
                 MetricCard(
                     modifier = Modifier.weight(1f),
@@ -333,7 +337,7 @@ private fun MetricsGrid(snapshot: DeviceSnapshot?) {
                     title = "Battery",
                     value = snapshot.batteryLevel?.let { "$it%" } ?: "--",
                     subtitle = snapshot.batteryTempC?.let { "Temp ${formatPercent(it)} C" } ?: "No temp data",
-                    progress = (snapshot.batteryLevel ?: 0) / 100f
+                    progress = snapshot.batteryLevel.orDefault() / 100f
                 )
             }
 
@@ -485,8 +489,8 @@ private fun WarningItemRow(item: WarningUiItem) {
 }
 
 private fun memoryPressure(availBytes: Long?, thresholdBytes: Long?): Float {
-    if (availBytes == null || thresholdBytes == null || thresholdBytes <= 0L) return 0f
-    return (thresholdBytes.toFloat() / availBytes.toFloat()).coerceIn(0f, 1f)
+    if (availBytes == null || thresholdBytes == null || thresholdBytes <= DEFAULT_LONG) return DEFAULT_FLOAT
+    return (thresholdBytes.toFloat() / availBytes.toFloat()).coerceIn(DEFAULT_FLOAT, 1f)
 }
 
 private fun thermalProgress(statusName: String): Float {
@@ -502,8 +506,8 @@ private fun thermalProgress(statusName: String): Float {
 }
 
 private fun networkDeltaProgress(rxDelta: Long?, txDelta: Long?): Float {
-    val total = (rxDelta ?: 0L) + (txDelta ?: 0L)
-    return (total / (1024f * 1024f * 3f)).coerceIn(0f, 1f)
+    val total = rxDelta.orDefault() + txDelta.orDefault()
+    return (total / (1024f * 1024f * 3f)).coerceIn(DEFAULT_FLOAT, 1f)
 }
 
 private fun formatPercent(value: Float?): String {
