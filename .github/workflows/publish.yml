@@ -1,14 +1,17 @@
-name: CI
+name: Publish to Maven Central
 
 on:
-  pull_request:
-    branches:
-      - master
+  push:
+    tags:
+      - "v*"
 
 jobs:
-  build-and-test:
+  publish:
 
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
 
     steps:
 
@@ -27,8 +30,12 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build
-        run: ./gradlew build --no-daemon --stacktrace
+      - name: Build Release
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Run Unit Tests
-        run: ./gradlew test --no-daemon --stacktrace
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
