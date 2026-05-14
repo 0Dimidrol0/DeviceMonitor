@@ -12,6 +12,13 @@ Lightweight Android telemetry library for high-load sessions such as media proce
 
 ---
 
+## Showcase
+
+![DeviceMonitor showcase main dashboard](docs/images/Screenshot_1.png)
+![DeviceMonitor showcase live metrics](docs/images/Screenshot_2.png)
+
+---
+
 ## Features
 
 DeviceMonitor tracks:
