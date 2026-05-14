@@ -49,7 +49,7 @@ SharedFlow<DeviceRecommendation>
 
 ```kotlin
 dependencies {
-    implementation("io.github.0dimidrol0:DeviceMonitor:0.4.0")
+    implementation("io.github.0dimidrol0:DeviceMonitor:0.5.0")
 }
 ```
 
@@ -57,7 +57,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'io.github.0dimidrol0:DeviceMonitor:0.4.0'
+    implementation 'io.github.0dimidrol0:DeviceMonitor:0.5.0'
 }
 ```
 
@@ -132,7 +132,7 @@ Populate this table with your device matrix (`mid`, `high`, `flagship`) to quick
 
 ---
 
-## Adaptive Workload Guard (0.4.0)
+## Adaptive Workload Guard (0.5.0)
 
 Recommendations are emitted from `monitor.recommendations` and can be applied directly to bitrate/FPS/concurrency controls.
 
@@ -310,7 +310,7 @@ Coverage includes:
 
 ## Changelog
 
-### 0.4.0
+### 0.5.0
 
 - Added Adaptive Workload Guard with `DeviceRecommendation` flow.
 - Added `ThermalHeadroomSnapshot` and `BatteryDrainSnapshot`.
