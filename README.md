@@ -322,11 +322,6 @@ Coverage includes:
 - Added richer workload report analytics (`avgRiskScore`, health-state time, thermal/battery peaks).
 - Split sensor reads into internal provider abstractions for cleaner extension points.
 
-### 0.3.0
-
-- Added extended telemetry (`thermalZones`, `networkTraffic`, `batteryPower`, frame metrics support).
-- Added `riskScore()` / `health()` helpers and warning transition throttling.
-
 ---
 
 ## License
