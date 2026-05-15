@@ -1,7 +1,7 @@
 # DeviceMonitor
 
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.0dimidrol0/DeviceMonitor)
-![Build](https://img.shields.io/github/actions/workflow/status/0Dimidrol0/DeviceMonitor/publish.yml?branch=master&label=build)
+![Release Build](https://img.shields.io/github/actions/workflow/status/0Dimidrol0/DeviceMonitor/publish.yml?label=release)
 ![Android](https://img.shields.io/badge/Android-library-3DDC84)
 ![minSdk](https://img.shields.io/badge/minSdk-26-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
